@@ -1,0 +1,8 @@
+.scala-build/
+.metals/
+.bsp/
+.zed/
+Invoice.pdf
+fonts/
+.DS_Store
+conf_*.scala

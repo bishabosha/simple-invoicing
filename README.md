@@ -1,0 +1,19 @@
+# Simple Invoicing
+
+This is an evolving script that you can clone and run yourself.
+
+## Usage
+
+```bash
+./invoicer.sc resources/sample-config.scala
+```
+
+the script takes 1 argument that is a Scala file (formatted as [Scala Object Notation](https://github.com/bishabosha/scala-object-notation)), following the schema in [Configs.scala](Configs.scala)
+
+output is generated to a single file in the same directory `Invoice.pdf` that you can rename as you wish.
+
+## Required Dependencies
+
+- [scala](https://www.scala-lang.org/download/) on PATH as `scala`.
+- Java virtual machine
+- `Inconsolata-Regular.ttf` installed to `fonts/inconsolata-4/Inconsolata-Regular.ttf` relative to repo root.

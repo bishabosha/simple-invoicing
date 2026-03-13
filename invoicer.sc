@@ -163,7 +163,7 @@ def splitText(
       end if
       currentLine ++= word ++ " "
   end for
-  lines += currentLine.toString
+  if currentLine.nonEmpty then lines += currentLine.toString
   lines.result()
 
 // Draw table grid
@@ -461,10 +461,8 @@ for (appendix, appendixIdx) <- conf.appendices.zipWithIndex do
         contentStream2.newLineAtOffset(0, -15)
       end for
       contentStream2.endText()
-      yPosition -= 15 * (lines2.length + 1)
-
-    yPosition -= 15
-
+      yPosition -= 15 * (lines2.length)
+      yPosition -= 5 // gap in list?
   end for
   contentStream2.close()
 end for

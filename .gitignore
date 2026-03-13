@@ -6,3 +6,6 @@ Invoice.pdf
 fonts/
 .DS_Store
 conf_*.scala
+
+# useful for symlinking to a directory of config files elsewhere
+linked-configs

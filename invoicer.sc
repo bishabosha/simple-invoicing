@@ -3,7 +3,7 @@
 //> using toolkit 0.9.1
 //> using dep org.apache.pdfbox:pdfbox:3.0.7
 //> using dep "io.github.bishabosha::enhanced-string-interpolator:1.0.2"
-//> using dep io.github.bishabosha:scala-object-notation_3:0.0.0-42-ad47ff
+//> using dep io.github.bishabosha::scala-object-notation:0.1.0
 //> using dep ch.epfl.lamp::steps::0.2.0
 //> using file Configs.scala
 
@@ -23,7 +23,7 @@ val (useInconsolata, configPath) =
   if args.contains("--inconsolata") then
     args.filterNot(_ == "--inconsolata") match
       case Array(configPath) => (true, configPath)
-      case _ => printUsageAndExit()
+      case _                 => printUsageAndExit()
   else
     if args.sizeIs != 1 then printUsageAndExit()
     (false, args(0))
@@ -87,7 +87,8 @@ enum Fonts(name: FontName) extends PDType1Font(name):
   case TimesRoman extends Fonts(FontName.TIMES_ROMAN)
 
 object FontPaths:
-  val InconsolataRegular = os.pwd / "fonts" / "inconsolata-4" / "Inconsolata-Regular.ttf"
+  val InconsolataRegular =
+    os.pwd / "fonts" / "inconsolata-4" / "Inconsolata-Regular.ttf"
 
 trait ExtendedFonts(doc: PDDocument):
   val InconsolataRegular = Font(FontPaths.InconsolataRegular)
@@ -104,7 +105,8 @@ val contentStream = new PDPageContentStream(document, page)
 
 object ExtendedFonts extends ExtendedFonts(document)
 
-val monospaceFont = if useInconsolata then ExtendedFonts.InconsolataRegular else Fonts.Courier
+val monospaceFont =
+  if useInconsolata then ExtendedFonts.InconsolataRegular else Fonts.Courier
 
 def rightAlignText(font: PDFont, text: String, y: Int, size: Int = 10): Unit =
   contentStream.beginText()

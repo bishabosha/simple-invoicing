@@ -5,6 +5,7 @@ This is an evolving script that you can clone and run yourself.
 ## Usage
 
 ```bash
+./invoicer.sc --inconsolata resources/sample-config.scala
 ./invoicer.sc resources/sample-config.scala
 ```
 
@@ -19,4 +20,4 @@ output is generated to a single file in the same directory `Invoice.pdf` that yo
 
 - [scala](https://www.scala-lang.org/download/) on PATH as `scala`.
 - Java virtual machine
-- `Inconsolata-Regular.ttf` installed to `fonts/inconsolata-4/Inconsolata-Regular.ttf` relative to repo root.
+- with `--inconsolata` mode you need `Inconsolata-Regular.ttf` installed to `fonts/inconsolata-4/Inconsolata-Regular.ttf` relative to repo root. This font is more readable than the default Courier (zeros have a strike compared to the letter `O`).

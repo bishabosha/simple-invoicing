@@ -15,14 +15,23 @@ object Logger:
       msg.linesWithSeparators.map(l => s"[Error] $l").mkString
     )
 
-if args.sizeIs < 1 then
-  Logger.error("args: <config-file>")
+def printUsageAndExit(): Nothing =
+  Logger.error("args: [--inconsolata] <config-file>")
   sys.exit(0)
+
+val (useInconsolata, configPath) =
+  if args.contains("--inconsolata") then
+    args.filterNot(_ == "--inconsolata") match
+      case Array(configPath) => (true, configPath)
+      case _ => printUsageAndExit()
+  else
+    if args.sizeIs != 1 then printUsageAndExit()
+    (false, args(0))
 
 /// computed values
 
-Logger.info(s"Begin - config file: ${args(0)}")
-val conf = configs.readConfig(os.rel / os.RelPath(args(0)))
+Logger.info(s"Begin - config file: ${configPath}")
+val conf = configs.readConfig(os.rel / os.RelPath(configPath))
 Logger.info("parsed config")
 
 import scala.math.BigDecimal.RoundingMode
@@ -77,10 +86,11 @@ enum Fonts(name: FontName) extends PDType1Font(name):
   case Courier extends Fonts(FontName.COURIER)
   case TimesRoman extends Fonts(FontName.TIMES_ROMAN)
 
+object FontPaths:
+  val InconsolataRegular = os.pwd / "fonts" / "inconsolata-4" / "Inconsolata-Regular.ttf"
+
 trait ExtendedFonts(doc: PDDocument):
-  val InconsolataRegular = Font(
-    os.pwd / "fonts" / "inconsolata-4" / "Inconsolata-Regular.ttf"
-  )
+  val InconsolataRegular = Font(FontPaths.InconsolataRegular)
   private def Font(path: os.Path) = PDType0Font.load(doc, path.toIO)
 
 end ExtendedFonts
@@ -93,6 +103,8 @@ document.addPage(page)
 val contentStream = new PDPageContentStream(document, page)
 
 object ExtendedFonts extends ExtendedFonts(document)
+
+val monospaceFont = if useInconsolata then ExtendedFonts.InconsolataRegular else Fonts.Courier
 
 def rightAlignText(font: PDFont, text: String, y: Int, size: Int = 10): Unit =
   contentStream.beginText()
@@ -310,7 +322,7 @@ contentStream.endText()
 rawPushLine() // space between payment instructions and bank details
 
 contentStream.beginText()
-contentStream.setFont(ExtendedFonts.InconsolataRegular, 10)
+contentStream.setFont(monospaceFont, 10)
 contentStream.newLineAtOffset(50, yPosition)
 contentStream.showText(s"Beneficiary: ${conf.bank.holder}")
 conf.bank.userAddress match
@@ -356,7 +368,7 @@ conf.twint.match
     // rawPushLine() // space between payment instructions and bank details
 
     contentStream.beginText()
-    contentStream.setFont(ExtendedFonts.InconsolataRegular, 10)
+    contentStream.setFont(monospaceFont, 10)
     contentStream.newLineAtOffset(165, yPosition)
     contentStream.showText(twint)
     contentStream.endText()

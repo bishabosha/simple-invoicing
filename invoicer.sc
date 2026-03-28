@@ -283,7 +283,9 @@ case class PageSpec(
 
 case class DocumentSpec(pages: Vector[PageSpec])
 
-object Markup:
+object Html:
+  type Fragment = Vector[FlowBlock]
+
   def stepsForLines(lines: Seq[String], lineHeight: Float): Vector[TextStep] =
     lines.headOption match
       case Some(head) =>
@@ -292,7 +294,10 @@ object Markup:
       case None =>
         Vector.empty
 
-  def at(x: Float, y: Float, style: TextStyle)(lines: String*): FixedText =
+  def txt(content: String, dx: Float = 0, dy: Float = 0): TextStep =
+    textStep(content, dx = dx, dy = dy)
+
+  def fixedLeft(x: Float, y: Float, style: TextStyle)(lines: String*): FixedText =
     FixedText(
       HorizontalAnchor.Left(x),
       y,
@@ -300,7 +305,7 @@ object Markup:
       stepsForLines(lines, style.lineHeight)
     )
 
-  def atRight(
+  def fixedRight(
       rightEdge: Float,
       y: Float,
       style: TextStyle,
@@ -313,35 +318,99 @@ object Markup:
       Vector(textStep(text))
     )
 
-  def flowText(style: TextStyle, x: Float = 0)(steps: TextStep*): FlowText =
+  def span(style: TextStyle, x: Float = 0)(steps: TextStep*): FlowText =
     FlowText(x, style, steps.toVector)
 
-  def row(texts: FlowText*): FlowBlock =
-    FlowBlock.Row(texts.toVector)
+  def row(texts: FlowText*): Fragment =
+    Vector(FlowBlock.Row(texts.toVector))
 
-  def line(style: TextStyle, text: String, x: Float = 0): FlowBlock =
-    row(flowText(style, x)(textStep(text)))
+  def div(children: Fragment*): Fragment =
+    children.foldLeft(Vector.empty[FlowBlock])(_ ++ _)
 
-  def lines(style: TextStyle, entries: Seq[String], x: Float = 0): FlowBlock =
-    row(FlowText(x, style, stepsForLines(entries, style.lineHeight)))
+  def p(style: TextStyle, x: Float = 0)(lines: String*): Fragment =
+    row(FlowText(x, style, stepsForLines(lines, style.lineHeight)))
 
-  def wrapped(
-      style: TextStyle,
-      text: String,
-      width: Int,
-      x: Float = 0
-  ): FlowBlock =
-    FlowBlock.WrappedText(x, width, style, text)
+  def wrapped(style: TextStyle, width: Int, x: Float = 0)(text: String): Fragment =
+    Vector(FlowBlock.WrappedText(x, width, style, text))
 
-  def gap(height: Float): FlowBlock =
-    FlowBlock.Gap(height)
+  def gap(height: Float): Fragment =
+    Vector(FlowBlock.Gap(height))
 
-  def rule(
+  def hr(
       startX: Float = 0,
       endX: Float = 500,
       width: Float = 0.5f
-  ): FlowBlock =
-    FlowBlock.Rule(startX, endX, width)
+  ): Fragment =
+    Vector(FlowBlock.Rule(startX, endX, width))
+
+  def th(header: String, width: Float, wrapWidth: Option[Int] = None): TableColumn =
+    TableColumn(header, width, wrapWidth)
+
+  def td(text: String, wrap: Boolean = false): TableCell =
+    TableCell(text, wrap)
+
+  def tr(cells: TableCell*): TableRow =
+    TableRow(cells.toVector)
+
+  def table(
+      headerStyle: TextStyle,
+      bodyStyle: TextStyle,
+      lineWidth: Float = 0.5f,
+      rowHeight: Float = 15,
+      gridOffsetY: Float = 4,
+      textInsetX: Float = 5
+  )(columns: TableColumn*)(rows: TableRow*): Fragment =
+    Vector(
+      FlowBlock.Table(
+        TableSpec(
+          columns = columns.toVector,
+          headerStyle = headerStyle,
+          bodyStyle = bodyStyle,
+          rows = rows.toVector,
+          lineWidth = lineWidth,
+          rowHeight = rowHeight,
+          gridOffsetY = gridOffsetY,
+          textInsetX = textInsetX
+        )
+      )
+    )
+
+  def li(text: String): String =
+    text
+
+  def ul(
+      style: TextStyle,
+      width: Int,
+      x: Float = 0,
+      bullet: String = "-",
+      bulletGap: Float = 10,
+      itemGap: Float = 5
+  )(items: String*): Fragment =
+    Vector(
+      FlowBlock.BulletList(
+        BulletListSpec(
+          style = style,
+          width = width,
+          items = items.toVector,
+          x = x,
+          bullet = bullet,
+          bulletGap = bulletGap,
+          itemGap = itemGap
+        )
+      )
+    )
+
+  def body(topY: Float, x: Float = 50)(children: Fragment*): FlowRegion =
+    FlowRegion(x = x, topY = topY, blocks = div(children*))
+
+  def page(
+      size: PageSize = PageSize.A4,
+      fixed: Seq[FixedText] = Seq.empty
+  )(regions: FlowRegion*): PageSpec =
+    PageSpec(size = size, fixed = fixed.toVector, flows = regions.toVector)
+
+  def document(pages: PageSpec*): DocumentSpec =
+    DocumentSpec(pages.toVector)
 
 object LayoutCompiler:
   private def textDepth(steps: Vector[TextStep]): Float =
@@ -438,7 +507,7 @@ object LayoutCompiler:
           baseX + x + spec.textInsetX,
           rowY,
           spec.bodyStyle,
-          Markup.stepsForLines(cellLines, spec.bodyStyle.lineHeight)
+          Html.stepsForLines(cellLines, spec.bodyStyle.lineHeight)
         )
       end for
       rowY -= spec.rowHeight * rowHeightUnits
@@ -495,7 +564,7 @@ object LayoutCompiler:
           baseX,
           currentY,
           FlowBlock.Row(
-            Vector(FlowText(x, style, Markup.stepsForLines(lines, style.lineHeight)))
+            Vector(FlowText(x, style, Html.stepsForLines(lines, style.lineHeight)))
           ),
           fontMetrics
         )
@@ -539,7 +608,7 @@ object LayoutCompiler:
     LayoutDocument(documentSpec.pages.map(compilePage(_, fontMetrics)))
 
 object InvoiceMarkup:
-  import Markup.*
+  import Html.*
 
   private val titleStyle = TextStyle(FontRef.HelveticaBold, 16, lineHeight = 20)
   private val headingStyle = TextStyle(FontRef.HelveticaBold, 10)
@@ -547,29 +616,24 @@ object InvoiceMarkup:
   private val italicStyle = TextStyle(FontRef.HelveticaOblique, 10)
   private val monospaceStyle = TextStyle(FontRef.Monospace, 10)
 
-  private def invoiceTable: TableSpec =
-    TableSpec(
-      columns = Vector(
-        TableColumn("Description", width = 315, wrapWidth = Some(315)),
-        TableColumn("Quantity", width = 50),
-        TableColumn("Unit Price", width = 60),
-        TableColumn("Total", width = 75)
-      ),
-      headerStyle = headingStyle,
-      bodyStyle = bodyStyle,
-      rows = items.map {
+  private def invoiceTable: Fragment =
+    table(headingStyle, bodyStyle)(
+      th("Description", width = 315, wrapWidth = Some(315)),
+      th("Quantity", width = 50),
+      th("Unit Price", width = 60),
+      th("Total", width = 75)
+    )(
+      items.map {
         case Order(description, quantity, unitPrice) =>
           val total = quantity * unitPrice
           val qty = if conf.listings.useHours then s"$quantity hrs" else s"$quantity"
-          TableRow(
-            Vector(
-              TableCell(description, wrap = true),
-              TableCell(qty),
-              TableCell(showMoney(unitPrice)),
-              TableCell(showMoney(total))
-            )
+          tr(
+            td(description, wrap = true),
+            td(qty),
+            td(showMoney(unitPrice)),
+            td(showMoney(total))
           )
-      }.toVector
+      }*
     )
 
   private def bankLines: Vector[String] =
@@ -595,129 +659,138 @@ object InvoiceMarkup:
         conf.bank.address
       )
 
-  private def twintBlocks: Vector[FlowBlock] =
-    conf.twint.toVector.flatMap { twint =>
-      Vector(
-        gap(30),
-        row(
-          flowText(headingStyle)(textStep("Or pay with TWINT:")),
-          flowText(monospaceStyle, x = 115)(textStep(twint))
+  private def clientBlock: Fragment =
+    div(
+      row(
+        span(headingStyle)(txt("Bill To:")),
+        span(bodyStyle, x = 40)(txt(conf.client.name))
+      ),
+      gap(15),
+      p(bodyStyle)(
+        (Vector(conf.client.address) ++ conf.client.contactPerson.toVector)*
+      )
+    )
+
+  private def paymentBlock: Fragment =
+    div(
+      p(headingStyle)("Payable to the following account:"),
+      gap(15),
+      p(monospaceStyle)(bankLines*)
+    )
+
+  private def twintBlock: Fragment =
+    conf.twint match
+      case Some(twint) =>
+        div(
+          gap(30),
+          row(
+            span(headingStyle)(txt("Or pay with TWINT:")),
+            span(monospaceStyle, x = 115)(txt(twint))
+          )
+        )
+      case None =>
+        div()
+
+  private def appendixSummaryItem(appendix: Appendix, idx: Int): Fragment =
+    div(
+      gap(15),
+      row(
+        span(italicStyle)(
+          txt("[x] "),
+          txt(appendixTitles(idx), dx = 15),
+          txt(appendix.description, dy = -italicStyle.lineHeight)
         )
       )
-    }
+    )
 
-  private def appendixSummaryBlocks: Vector[FlowBlock] =
-    if conf.appendices.isEmpty then Vector.empty
+  private def appendixSummaryBlock: Fragment =
+    if conf.appendices.isEmpty then div()
     else
-      Vector(
-        gap(15),
-        rule(),
-        gap(15),
-        line(headingStyle, "Appendices:"),
-        gap(15)
-      ) ++
-        conf.appendices.zipWithIndex.flatMap { (appendix, idx) =>
-          Vector(
-            gap(15),
-            row(
-              flowText(italicStyle)(
-                textStep("[x] "),
-                textStep(appendixTitles(idx), dx = 15),
-                textStep(appendix.description, dy = -italicStyle.lineHeight)
-              )
-            )
-          )
-        }.toVector
-
-  private def appendixBlocks(appendix: Appendix): Vector[FlowBlock] =
-    appendix.sections.flatMap { section =>
-      Vector(
-        line(headingStyle, section.title),
-        gap(15),
-        wrapped(italicStyle, section.desc, width = 500),
-        gap(15),
-        line(bodyStyle, section.itemsTitle),
-        gap(15),
-        FlowBlock.BulletList(
-          BulletListSpec(
-            style = bodyStyle,
-            width = 450,
-            items = section.items.map((id, desc) => s"$id: $desc").toVector
-          )
+      val items =
+        conf.appendices.zipWithIndex.map(appendixSummaryItem).toVector
+      div(
+        div(
+          gap(15),
+          hr(),
+          gap(15),
+          p(headingStyle)("Appendices:")
+        ),
+        div(
+          gap(15),
+          div(items*)
         )
       )
-    }.toVector
+
+  private def appendixSection(section: AppendixSection): Fragment =
+    div(
+      p(headingStyle)(section.title),
+      gap(15),
+      wrapped(italicStyle, width = 500)(section.desc),
+      gap(15),
+      p(bodyStyle)(section.itemsTitle),
+      gap(15),
+      ul(bodyStyle, width = 450)(
+        section.items.map((id, desc) => li(s"$id: $desc"))*
+      )
+    )
 
   private def appendixPage(appendix: Appendix, appendixIdx: Int): PageSpec =
-    PageSpec(
-      flows = Vector(
-        FlowRegion(
-          x = 50,
-          topY = 750,
-          blocks =
-            Vector(
-              line(titleStyle, appendixTitles(appendixIdx)),
-              gap(20),
-              line(italicStyle, appendix.description),
-              gap(30)
-            ) ++ appendixBlocks(appendix)
+    page()(
+      body(topY = 750)(
+        div(
+          p(titleStyle)(appendixTitles(appendixIdx)),
+          gap(20),
+          p(italicStyle)(appendix.description),
+          gap(30),
+          div(appendix.sections.map(appendixSection)*)
         )
       )
     )
 
   def build: DocumentSpec =
-    val firstPageBlocks =
-      Vector(
-        FlowBlock.Table(invoiceTable),
-        gap(15),
-        line(headingStyle, s"Total Amount Due: ${showMoney(subtotal, verbose = true)}"),
-        gap(30),
-        row(
-          flowText(headingStyle)(textStep("Bill To:")),
-          flowText(bodyStyle, x = 40)(textStep(conf.client.name))
-        ),
-        gap(15),
-        lines(
-          bodyStyle,
-          Vector(conf.client.address) ++ conf.client.contactPerson.toVector
-        ),
-        gap(30),
-        line(headingStyle, "Payable to the following account:"),
-        gap(15),
-        lines(monospaceStyle, bankLines)
-      ) ++ twintBlocks ++ appendixSummaryBlocks
-
     val firstPage =
-      PageSpec(
+      page(
         fixed = Vector(
-          at(50, 750, titleStyle)("INVOICE"),
-          at(50, 730, bodyStyle)(
+          fixedLeft(50, 750, titleStyle)("INVOICE"),
+          fixedLeft(50, 730, bodyStyle)(
             conf.business.name,
             conf.business.address,
             conf.business.contact
           ),
-          atRight(550, 680, headingStyle, s"Invoice No: ${invoiceCode}"),
-          atRight(
+          fixedRight(550, 680, headingStyle, s"Invoice No: ${invoiceCode}"),
+          fixedRight(
             550,
             665,
             bodyStyle,
             s"Issue Date: ${dateFormatter.format(startDate)}"
           ),
-          atRight(
+          fixedRight(
             550,
             650,
             bodyStyle,
             s"Due Date: ${dateFormatter.format(dueDate)}"
           )
-        ),
-        flows = Vector(
-          FlowRegion(x = 50, topY = 640, blocks = firstPageBlocks)
+        )
+      )(
+        body(topY = 640)(
+          div(
+            invoiceTable,
+            gap(15),
+            p(headingStyle)(
+              s"Total Amount Due: ${showMoney(subtotal, verbose = true)}"
+            ),
+            gap(30),
+            clientBlock,
+            gap(30),
+            paymentBlock,
+            twintBlock,
+            appendixSummaryBlock
+          )
         )
       )
 
-    DocumentSpec(
-      Vector(firstPage) ++
-        conf.appendices.zipWithIndex.map(appendixPage).toVector
+    document(
+      (Vector(firstPage) ++ conf.appendices.zipWithIndex.map(appendixPage).toVector)*
     )
 
 object PdfRenderer:

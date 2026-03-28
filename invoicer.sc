@@ -55,6 +55,19 @@ val dateFormatter = java.time.format.DateTimeFormatter.ofPattern("dd MMM yyyy")
 
 case class Order(description: String, quantity: Int, unitPrice: BigDecimal)
 
+type AppendixSection = (
+    title: String,
+    desc: String,
+    itemsTitle: String,
+    items: Vector[(id: String, desc: String)]
+)
+
+type Appendix = (
+    title: String,
+    description: String,
+    sections: Vector[AppendixSection]
+)
+
 var itemsPrice: BigDecimal = 0.0
 val itemsB = List.newBuilder[Order]
 for item <- conf.listings.items do
@@ -206,245 +219,506 @@ def showMoney(value: BigDecimal, verbose: Boolean = false): String =
     else s"$combined ${conf.currency.symbol} (${conf.currency.code})"
   else combined
 
-object InvoiceLayout:
-  private def rightAlignText(
-      page: PageBuilder,
-      fontMetrics: FontMetrics,
-      font: FontRef,
-      text: String,
+case class TextStyle(font: FontRef, size: Int, lineHeight: Float = 15)
+
+enum HorizontalAnchor:
+  case Left(x: Float)
+  case Right(rightEdge: Float)
+
+case class FixedText(
+    anchor: HorizontalAnchor,
+    y: Float,
+    style: TextStyle,
+    steps: Vector[TextStep]
+)
+
+case class FlowText(x: Float, style: TextStyle, steps: Vector[TextStep])
+
+case class TableColumn(
+    header: String,
+    width: Float,
+    wrapWidth: Option[Int] = None
+)
+
+case class TableCell(text: String, wrap: Boolean = false)
+
+case class TableRow(cells: Vector[TableCell])
+
+case class TableSpec(
+    columns: Vector[TableColumn],
+    headerStyle: TextStyle,
+    bodyStyle: TextStyle,
+    rows: Vector[TableRow],
+    lineWidth: Float = 0.5f,
+    rowHeight: Float = 15,
+    gridOffsetY: Float = 4,
+    textInsetX: Float = 5
+)
+
+case class BulletListSpec(
+    style: TextStyle,
+    width: Int,
+    items: Vector[String],
+    x: Float = 0,
+    bullet: String = "-",
+    bulletGap: Float = 10,
+    itemGap: Float = 5
+)
+
+enum FlowBlock:
+  case Gap(height: Float)
+  case Row(texts: Vector[FlowText])
+  case WrappedText(x: Float, width: Int, style: TextStyle, text: String)
+  case Rule(startX: Float = 0, endX: Float = 500, width: Float = 0.5f)
+  case Table(spec: TableSpec)
+  case BulletList(spec: BulletListSpec)
+
+case class FlowRegion(x: Float, topY: Float, blocks: Vector[FlowBlock])
+
+case class PageSpec(
+    size: PageSize = PageSize.A4,
+    fixed: Vector[FixedText] = Vector.empty,
+    flows: Vector[FlowRegion] = Vector.empty
+)
+
+case class DocumentSpec(pages: Vector[PageSpec])
+
+object Markup:
+  def stepsForLines(lines: Seq[String], lineHeight: Float): Vector[TextStep] =
+    lines.headOption match
+      case Some(head) =>
+        Vector(textStep(head)) ++
+          lines.tail.map(line => textStep(line, dy = -lineHeight))
+      case None =>
+        Vector.empty
+
+  def at(x: Float, y: Float, style: TextStyle)(lines: String*): FixedText =
+    FixedText(
+      HorizontalAnchor.Left(x),
+      y,
+      style,
+      stepsForLines(lines, style.lineHeight)
+    )
+
+  def atRight(
+      rightEdge: Float,
       y: Float,
-      size: Int = 10
+      style: TextStyle,
+      text: String
+  ): FixedText =
+    FixedText(
+      HorizontalAnchor.Right(rightEdge),
+      y,
+      style,
+      Vector(textStep(text))
+    )
+
+  def flowText(style: TextStyle, x: Float = 0)(steps: TextStep*): FlowText =
+    FlowText(x, style, steps.toVector)
+
+  def row(texts: FlowText*): FlowBlock =
+    FlowBlock.Row(texts.toVector)
+
+  def line(style: TextStyle, text: String, x: Float = 0): FlowBlock =
+    row(flowText(style, x)(textStep(text)))
+
+  def lines(style: TextStyle, entries: Seq[String], x: Float = 0): FlowBlock =
+    row(FlowText(x, style, stepsForLines(entries, style.lineHeight)))
+
+  def wrapped(
+      style: TextStyle,
+      text: String,
+      width: Int,
+      x: Float = 0
+  ): FlowBlock =
+    FlowBlock.WrappedText(x, width, style, text)
+
+  def gap(height: Float): FlowBlock =
+    FlowBlock.Gap(height)
+
+  def rule(
+      startX: Float = 0,
+      endX: Float = 500,
+      width: Float = 0.5f
+  ): FlowBlock =
+    FlowBlock.Rule(startX, endX, width)
+
+object LayoutCompiler:
+  private def textDepth(steps: Vector[TextStep]): Float =
+    var offsetY = 0f
+    var minY = 0f
+    for step <- steps do
+      offsetY += step.dy
+      if offsetY < minY then minY = offsetY
+    -minY
+
+  private def emitText(
+      page: PageBuilder,
+      x: Float,
+      y: Float,
+      style: TextStyle,
+      steps: Vector[TextStep]
   ): Unit =
-    val textWidth = fontMetrics.stringWidth(font, text, size)
-    page.text(font, size, 550 - textWidth, y)(textStep(text))
+    if steps.nonEmpty then
+      page.text(style.font, style.size, x, y)(steps*)
 
-  def build(fontMetrics: FontMetrics): LayoutDocument =
-    val firstPage = new PageBuilder()
+  private def anchoredX(fixed: FixedText, fontMetrics: FontMetrics): Float =
+    fixed.anchor match
+      case HorizontalAnchor.Left(x) =>
+        x
+      case HorizontalAnchor.Right(rightEdge) =>
+        val firstText = fixed.steps.headOption.map(_.text).getOrElse("")
+        rightEdge - fontMetrics.stringWidth(
+          fixed.style.font,
+          firstText,
+          fixed.style.size
+        )
 
-    firstPage.text(FontRef.HelveticaBold, 16, 50, 750)(textStep("INVOICE"))
-    firstPage.text(FontRef.Helvetica, 10, 50, 730)(
-      textStep(conf.business.name),
-      textStep(conf.business.address, dy = -15),
-      textStep(conf.business.contact, dy = -15)
-    )
+  private def compileTable(
+      page: PageBuilder,
+      baseX: Float,
+      topY: Float,
+      spec: TableSpec,
+      fontMetrics: FontMetrics
+  ): Float =
+    val colBoundaries = spec.columns.scanLeft(0f)(_ + _.width).toVector
+    val colStarts = colBoundaries.init
+    val totalWidth = colBoundaries.lastOption.getOrElse(0f)
+    val headerY = topY - spec.rowHeight
 
-    rightAlignText(
-      firstPage,
-      fontMetrics,
-      FontRef.HelveticaBold,
-      s"Invoice No: ${invoiceCode}",
-      680
-    )
-    rightAlignText(
-      firstPage,
-      fontMetrics,
-      FontRef.Helvetica,
-      s"Issue Date: ${dateFormatter.format(startDate)}",
-      665
-    )
-    rightAlignText(
-      firstPage,
-      fontMetrics,
-      FontRef.Helvetica,
-      s"Due Date: ${dateFormatter.format(dueDate)}",
-      650
-    )
+    for (column, x) <- spec.columns.zip(colStarts) do
+      emitText(
+        page,
+        baseX + x + spec.textInsetX,
+        headerY,
+        spec.headerStyle,
+        Vector(textStep(column.header))
+      )
 
-    val lineBuckets = items.map(item =>
-      splitText(item.description, 365 - 50, FontRef.Helvetica, 10, fontMetrics)
-    )
+    val rowLines =
+      spec.rows.map { row =>
+        row.cells.zip(spec.columns).map { (cell, column) =>
+          if cell.wrap then
+            splitText(
+              cell.text,
+              column.wrapWidth.getOrElse(column.width.toInt),
+              spec.bodyStyle.font,
+              spec.bodyStyle.size,
+              fontMetrics
+            )
+          else List(cell.text)
+        }
+      }
 
-    val rows = lineBuckets.flatten.size
-    val rowHeight = 15
-    val tableTopY = 640
-    val tableOffset = 4
-    val tableBottomY = tableTopY - ((rows + 1) * rowHeight)
-    val tableStartX = 50
-    val tableEndX = 550
+    val rowHeights = rowLines.map(_.map(_.size).maxOption.getOrElse(1))
+    val tableBottomY = topY - ((rowHeights.sum + 1) * spec.rowHeight)
 
     locally:
       var i = 0
-      for bucketSize <- 1 +: lineBuckets.map(_.size) ++: Seq(1) do
-        val y = tableTopY - tableOffset - i * rowHeight
-        firstPage.line(0.5f, tableStartX, y, tableEndX, y)
+      for bucketSize <- 1 +: rowHeights ++: Seq(1) do
+        val y = topY - spec.gridOffsetY - i * spec.rowHeight
+        page.line(spec.lineWidth, baseX, y, baseX + totalWidth, y)
         i += bucketSize
       end for
 
-    val colPositions = List(50, 365, 415, 475, 550)
-    for x <- colPositions do
-      firstPage.line(
-        0.5f,
-        x,
-        tableTopY - tableOffset,
-        x,
-        tableBottomY - tableOffset
+    for x <- colBoundaries do
+      page.line(
+        spec.lineWidth,
+        baseX + x,
+        topY - spec.gridOffsetY,
+        baseX + x,
+        tableBottomY - spec.gridOffsetY
       )
 
-    val (unitKind, perUnit) = ("Quantity", "Unit Price")
-    firstPage.text(FontRef.HelveticaBold, 10, 55, tableTopY - 15)(
-      textStep("Description"),
-      textStep(unitKind, dx = 315),
-      textStep(perUnit, dx = 50),
-      textStep("Total", dx = 60)
-    )
-
-    var yPosition = tableTopY - rowHeight
-
-    for (Order(_, quantity, unitPrice), desc) <- items.zip(lineBuckets) do
-      val total = quantity * unitPrice
-      val qty = if conf.listings.useHours then s"$quantity hrs" else s"$quantity"
-      val stepsB = Vector.newBuilder[TextStep]
-      for firstDesc <- desc.headOption do stepsB += textStep(firstDesc)
-      stepsB += textStep(qty, dx = 365 - 50)
-      stepsB += textStep(showMoney(unitPrice), dx = 50)
-      stepsB += textStep(showMoney(total), dx = 60)
-      val otherDescRows = desc.tail
-      if otherDescRows.nonEmpty then
-        stepsB += textStep(otherDescRows.head, dx = -425, dy = -15)
-        for remaining <- otherDescRows.tail do
-          stepsB += textStep(remaining, dy = -15)
-      end if
-      firstPage.text(FontRef.Helvetica, 10, 55, yPosition - 15)(
-        stepsB.result()*
-      )
-      yPosition -= rowHeight * desc.size
+    var rowY = topY - (spec.rowHeight * 2)
+    for (cells, rowHeightUnits) <- rowLines.zip(rowHeights) do
+      for ((cellLines, _), x) <- cells.zip(spec.columns).zip(colStarts) do
+        emitText(
+          page,
+          baseX + x + spec.textInsetX,
+          rowY,
+          spec.bodyStyle,
+          Markup.stepsForLines(cellLines, spec.bodyStyle.lineHeight)
+        )
+      end for
+      rowY -= spec.rowHeight * rowHeightUnits
     end for
 
-    yPosition -= 15
-    firstPage.text(FontRef.HelveticaBold, 10, 50, yPosition)(
-      textStep(s"Total Amount Due: ${showMoney(subtotal, verbose = true)}")
-    )
+    spec.rowHeight * (rowHeights.sum + 1)
 
-    yPosition -= 30
-    firstPage.text(FontRef.HelveticaBold, 10, 50, yPosition)(
-      textStep("Bill To:")
-    )
-    firstPage.text(FontRef.Helvetica, 10, 90, yPosition)(
-      textStep(conf.client.name)
-    )
-
-    yPosition -= 15
-    val clientStepsB = Vector.newBuilder[TextStep]
-    clientStepsB += textStep(conf.client.address)
-    conf.client.contactPerson.foreach { contactPerson =>
-      clientStepsB += textStep(contactPerson, dy = -15)
-    }
-    firstPage.text(FontRef.Helvetica, 10, 50, yPosition)(clientStepsB.result()*)
-    if conf.client.contactPerson.nonEmpty then yPosition -= 15
-
-    yPosition -= 30
-    firstPage.text(FontRef.HelveticaBold, 10, 50, yPosition)(
-      textStep("Payable to the following account:")
-    )
-
-    yPosition -= 15
-    val bankStepsB = Vector.newBuilder[TextStep]
-    bankStepsB += textStep(s"Beneficiary: ${conf.bank.holder}")
-    conf.bank.userAddress.foreach { userAddress =>
-      bankStepsB += textStep(s"Beneficiary Address: ${userAddress}", dy = -15)
-    }
-    bankStepsB += textStep(s"IBAN: ${conf.bank.account}", dy = -15)
-    bankStepsB += textStep(s"Recipient SWIFT/BIC: ${conf.bank.swift}", dy = -15)
-    conf.bank.intermediary.foreach { intermediary =>
-      bankStepsB += textStep(s"Intermediary bank BIC: ${intermediary}", dy = -15)
-    }
-    conf.bank.routing.foreach { routing =>
-      bankStepsB += textStep(s"Routing number: ${routing}", dy = -15)
-    }
-    bankStepsB += textStep(s"Message for payee: ${invoiceCode}", dy = -15)
-    bankStepsB += textStep(s"Bank Name and Address: ${conf.bank.name}", dy = -15)
-    bankStepsB += textStep(conf.bank.address, dy = -15)
-    val bankSteps = bankStepsB.result()
-    firstPage.text(FontRef.Monospace, 10, 50, yPosition)(bankSteps*)
-    yPosition -= 15 * (bankSteps.size - 1)
-
-    conf.twint.foreach { twint =>
-      yPosition -= 30
-      firstPage.text(FontRef.HelveticaBold, 10, 50, yPosition)(
-        textStep("Or pay with TWINT:")
-      )
-      firstPage.text(FontRef.Monospace, 10, 165, yPosition)(textStep(twint))
-    }
-
-    if conf.appendices.nonEmpty then
-      yPosition -= 15
-      firstPage.line(0.5f, 50, yPosition, 550, yPosition)
-
-      yPosition -= 15
-      firstPage.text(FontRef.HelveticaBold, 10, 50, yPosition)(
-        textStep("Appendices:")
-      )
-
-      yPosition -= 15
-      for (appendix, idx) <- conf.appendices.zipWithIndex do
-        yPosition -= 15
-        firstPage.text(FontRef.HelveticaOblique, 10, 50, yPosition)(
-          textStep("[x] "),
-          textStep(appendixTitles(idx), dx = 15),
-          textStep(appendix.description, dy = -15)
-        )
-        yPosition -= 15
-      end for
-    end if
-
-    val appendixPages =
-      conf.appendices.zipWithIndex.map { (appendix, appendixIdx) =>
-        val appendixPage = new PageBuilder()
-        appendixPage.text(FontRef.HelveticaBold, 16, 50, 750)(
-          textStep(appendixTitles(appendixIdx))
-        )
-
-        var appendixY = 750 - 20
-        appendixPage.text(FontRef.HelveticaOblique, 10, 50, appendixY)(
-          textStep(appendix.description)
-        )
-        appendixY -= 30
-
-        for section <- appendix.sections do
-          appendixPage.text(FontRef.HelveticaBold, 10, 50, appendixY)(
-            textStep(section.title)
-          )
-
-          val lines =
-            splitText(section.desc, 500, FontRef.HelveticaOblique, 10, fontMetrics)
-          for (line, idx) <- lines.zipWithIndex do
-            appendixPage.text(
-              FontRef.HelveticaOblique,
-              10,
-              50,
-              appendixY - 15 * (idx + 1)
-            )(textStep(line))
-          end for
-          appendixY -= 15 * (lines.length + 1)
-
-          appendixPage.text(FontRef.Helvetica, 10, 50, appendixY)(
-            textStep(section.itemsTitle)
-          )
-          appendixY -= 15
-
-          for (id, desc) <- section.items do
-            val lines2 =
-              splitText(s"$id: $desc", 450, FontRef.Helvetica, 10, fontMetrics)
-            val itemStepsB = Vector.newBuilder[TextStep]
-            itemStepsB += textStep("-")
-            lines2.headOption.foreach { firstLine =>
-              itemStepsB += textStep(firstLine, dx = 10)
-            }
-            for line <- lines2.tail do
-              itemStepsB += textStep(line, dy = -15)
-            end for
-            appendixPage.text(FontRef.Helvetica, 10, 50, appendixY)(
-              itemStepsB.result()*
-            )
-            appendixY -= 15 * lines2.length
-            appendixY -= 5
-          end for
-        end for
-
-        appendixPage.result()
+  private def compileBulletList(
+      page: PageBuilder,
+      baseX: Float,
+      topY: Float,
+      spec: BulletListSpec,
+      fontMetrics: FontMetrics
+  ): Float =
+    var currentY = topY
+    for item <- spec.items do
+      val lines =
+        splitText(item, spec.width, spec.style.font, spec.style.size, fontMetrics)
+      val stepsB = Vector.newBuilder[TextStep]
+      stepsB += textStep(spec.bullet)
+      lines.headOption.foreach { firstLine =>
+        stepsB += textStep(firstLine, dx = spec.bulletGap)
       }
+      for line <- lines.tail do
+        stepsB += textStep(line, dy = -spec.style.lineHeight)
+      end for
+      emitText(page, baseX + spec.x, currentY, spec.style, stepsB.result())
+      currentY -= spec.style.lineHeight * lines.length
+      currentY -= spec.itemGap
+    end for
+    topY - currentY
 
-    LayoutDocument(Vector(firstPage.result()) ++ appendixPages)
+  private def compileFlowBlock(
+      page: PageBuilder,
+      baseX: Float,
+      currentY: Float,
+      block: FlowBlock,
+      fontMetrics: FontMetrics
+  ): Float =
+    block match
+      case FlowBlock.Gap(height) =>
+        currentY - height
+      case FlowBlock.Row(texts) =>
+        var maxDepth = 0f
+        for text <- texts do
+          emitText(page, baseX + text.x, currentY, text.style, text.steps)
+          maxDepth = maxDepth.max(textDepth(text.steps))
+        end for
+        currentY - maxDepth
+      case FlowBlock.WrappedText(x, width, style, text) =>
+        val lines = splitText(text, width, style.font, style.size, fontMetrics)
+        compileFlowBlock(
+          page,
+          baseX,
+          currentY,
+          FlowBlock.Row(
+            Vector(FlowText(x, style, Markup.stepsForLines(lines, style.lineHeight)))
+          ),
+          fontMetrics
+        )
+      case FlowBlock.Rule(startX, endX, width) =>
+        page.line(width, baseX + startX, currentY, baseX + endX, currentY)
+        currentY
+      case FlowBlock.Table(spec) =>
+        currentY - compileTable(page, baseX, currentY, spec, fontMetrics)
+      case FlowBlock.BulletList(spec) =>
+        currentY - compileBulletList(page, baseX, currentY, spec, fontMetrics)
+
+  private def compilePage(
+      pageSpec: PageSpec,
+      fontMetrics: FontMetrics
+  ): LayoutPage =
+    val page = new PageBuilder(pageSpec.size)
+
+    for fixed <- pageSpec.fixed do
+      emitText(
+        page,
+        anchoredX(fixed, fontMetrics),
+        fixed.y,
+        fixed.style,
+        fixed.steps
+      )
+    end for
+
+    for flow <- pageSpec.flows do
+      var currentY = flow.topY
+      for block <- flow.blocks do
+        currentY = compileFlowBlock(page, flow.x, currentY, block, fontMetrics)
+      end for
+    end for
+
+    page.result()
+
+  def compile(
+      documentSpec: DocumentSpec,
+      fontMetrics: FontMetrics
+  ): LayoutDocument =
+    LayoutDocument(documentSpec.pages.map(compilePage(_, fontMetrics)))
+
+object InvoiceMarkup:
+  import Markup.*
+
+  private val titleStyle = TextStyle(FontRef.HelveticaBold, 16, lineHeight = 20)
+  private val headingStyle = TextStyle(FontRef.HelveticaBold, 10)
+  private val bodyStyle = TextStyle(FontRef.Helvetica, 10)
+  private val italicStyle = TextStyle(FontRef.HelveticaOblique, 10)
+  private val monospaceStyle = TextStyle(FontRef.Monospace, 10)
+
+  private def invoiceTable: TableSpec =
+    TableSpec(
+      columns = Vector(
+        TableColumn("Description", width = 315, wrapWidth = Some(315)),
+        TableColumn("Quantity", width = 50),
+        TableColumn("Unit Price", width = 60),
+        TableColumn("Total", width = 75)
+      ),
+      headerStyle = headingStyle,
+      bodyStyle = bodyStyle,
+      rows = items.map {
+        case Order(description, quantity, unitPrice) =>
+          val total = quantity * unitPrice
+          val qty = if conf.listings.useHours then s"$quantity hrs" else s"$quantity"
+          TableRow(
+            Vector(
+              TableCell(description, wrap = true),
+              TableCell(qty),
+              TableCell(showMoney(unitPrice)),
+              TableCell(showMoney(total))
+            )
+          )
+      }.toVector
+    )
+
+  private def bankLines: Vector[String] =
+    Vector(
+      s"Beneficiary: ${conf.bank.holder}"
+    ) ++
+      conf.bank.userAddress.toVector.map(userAddress =>
+        s"Beneficiary Address: ${userAddress}"
+      ) ++
+      Vector(
+        s"IBAN: ${conf.bank.account}",
+        s"Recipient SWIFT/BIC: ${conf.bank.swift}"
+      ) ++
+      conf.bank.intermediary.toVector.map(intermediary =>
+        s"Intermediary bank BIC: ${intermediary}"
+      ) ++
+      conf.bank.routing.toVector.map(routing =>
+        s"Routing number: ${routing}"
+      ) ++
+      Vector(
+        s"Message for payee: ${invoiceCode}",
+        s"Bank Name and Address: ${conf.bank.name}",
+        conf.bank.address
+      )
+
+  private def twintBlocks: Vector[FlowBlock] =
+    conf.twint.toVector.flatMap { twint =>
+      Vector(
+        gap(30),
+        row(
+          flowText(headingStyle)(textStep("Or pay with TWINT:")),
+          flowText(monospaceStyle, x = 115)(textStep(twint))
+        )
+      )
+    }
+
+  private def appendixSummaryBlocks: Vector[FlowBlock] =
+    if conf.appendices.isEmpty then Vector.empty
+    else
+      Vector(
+        gap(15),
+        rule(),
+        gap(15),
+        line(headingStyle, "Appendices:"),
+        gap(15)
+      ) ++
+        conf.appendices.zipWithIndex.flatMap { (appendix, idx) =>
+          Vector(
+            gap(15),
+            row(
+              flowText(italicStyle)(
+                textStep("[x] "),
+                textStep(appendixTitles(idx), dx = 15),
+                textStep(appendix.description, dy = -italicStyle.lineHeight)
+              )
+            )
+          )
+        }.toVector
+
+  private def appendixBlocks(appendix: Appendix): Vector[FlowBlock] =
+    appendix.sections.flatMap { section =>
+      Vector(
+        line(headingStyle, section.title),
+        gap(15),
+        wrapped(italicStyle, section.desc, width = 500),
+        gap(15),
+        line(bodyStyle, section.itemsTitle),
+        gap(15),
+        FlowBlock.BulletList(
+          BulletListSpec(
+            style = bodyStyle,
+            width = 450,
+            items = section.items.map((id, desc) => s"$id: $desc").toVector
+          )
+        )
+      )
+    }.toVector
+
+  private def appendixPage(appendix: Appendix, appendixIdx: Int): PageSpec =
+    PageSpec(
+      flows = Vector(
+        FlowRegion(
+          x = 50,
+          topY = 750,
+          blocks =
+            Vector(
+              line(titleStyle, appendixTitles(appendixIdx)),
+              gap(20),
+              line(italicStyle, appendix.description),
+              gap(30)
+            ) ++ appendixBlocks(appendix)
+        )
+      )
+    )
+
+  def build: DocumentSpec =
+    val firstPageBlocks =
+      Vector(
+        FlowBlock.Table(invoiceTable),
+        gap(15),
+        line(headingStyle, s"Total Amount Due: ${showMoney(subtotal, verbose = true)}"),
+        gap(30),
+        row(
+          flowText(headingStyle)(textStep("Bill To:")),
+          flowText(bodyStyle, x = 40)(textStep(conf.client.name))
+        ),
+        gap(15),
+        lines(
+          bodyStyle,
+          Vector(conf.client.address) ++ conf.client.contactPerson.toVector
+        ),
+        gap(30),
+        line(headingStyle, "Payable to the following account:"),
+        gap(15),
+        lines(monospaceStyle, bankLines)
+      ) ++ twintBlocks ++ appendixSummaryBlocks
+
+    val firstPage =
+      PageSpec(
+        fixed = Vector(
+          at(50, 750, titleStyle)("INVOICE"),
+          at(50, 730, bodyStyle)(
+            conf.business.name,
+            conf.business.address,
+            conf.business.contact
+          ),
+          atRight(550, 680, headingStyle, s"Invoice No: ${invoiceCode}"),
+          atRight(
+            550,
+            665,
+            bodyStyle,
+            s"Issue Date: ${dateFormatter.format(startDate)}"
+          ),
+          atRight(
+            550,
+            650,
+            bodyStyle,
+            s"Due Date: ${dateFormatter.format(dueDate)}"
+          )
+        ),
+        flows = Vector(
+          FlowRegion(x = 50, topY = 640, blocks = firstPageBlocks)
+        )
+      )
+
+    DocumentSpec(
+      Vector(firstPage) ++
+        conf.appendices.zipWithIndex.map(appendixPage).toVector
+    )
 
 object PdfRenderer:
   private final class PdfFontCatalog(document: PDDocument, useInconsolata: Boolean)
@@ -513,6 +787,8 @@ object PdfRenderer:
       document.save(outputPath.toIO)
     finally document.close()
 
-PdfRenderer.render(os.pwd / "Invoice.pdf", useInconsolata)(InvoiceLayout.build)
+PdfRenderer.render(os.pwd / "Invoice.pdf", useInconsolata) { fontMetrics =>
+  LayoutCompiler.compile(InvoiceMarkup.build, fontMetrics)
+}
 
 Logger.info("Invoice created successfully.")

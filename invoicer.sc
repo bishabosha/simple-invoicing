@@ -71,6 +71,11 @@ val (subtotal, items) = optTaxRate match
   case None =>
     (itemsPrice, itemsB.result())
 
+val appendixTitles = ('A' to 'Z')
+  .to(LazyList)
+  .lazyZip(conf.appendices)
+  .map((letter, appendix) => s"Appendix $letter ($"${appendix.title}$")")
+
 /// PDF generation
 
 import org.apache.pdfbox.pdmodel.{PDDocument, PDPage, PDPageContentStream}
@@ -86,70 +91,78 @@ enum Fonts(name: FontName) extends PDType1Font(name):
   case Courier extends Fonts(FontName.COURIER)
   case TimesRoman extends Fonts(FontName.TIMES_ROMAN)
 
+enum FontRef:
+  case Helvetica
+  case HelveticaBold
+  case HelveticaOblique
+  case Courier
+  case TimesRoman
+  case Monospace
+
+enum PageSize:
+  case A4
+
+case class TextStep(dx: Float = 0, dy: Float = 0, text: String)
+
+enum PageElement:
+  case Text(
+      font: FontRef,
+      size: Int,
+      x: Float,
+      y: Float,
+      steps: Vector[TextStep]
+  )
+  case Line(
+      width: Float,
+      startX: Float,
+      startY: Float,
+      endX: Float,
+      endY: Float
+  )
+
+case class LayoutPage(size: PageSize = PageSize.A4, elements: Vector[PageElement])
+case class LayoutDocument(pages: Vector[LayoutPage])
+
+def textStep(text: String, dx: Float = 0, dy: Float = 0): TextStep =
+  TextStep(dx = dx, dy = dy, text = text)
+
 object FontPaths:
   val InconsolataRegular =
     os.pwd / "fonts" / "inconsolata-4" / "Inconsolata-Regular.ttf"
 
 trait ExtendedFonts(doc: PDDocument):
-  val InconsolataRegular = Font(FontPaths.InconsolataRegular)
+  lazy val InconsolataRegular = Font(FontPaths.InconsolataRegular)
   private def Font(path: os.Path) = PDType0Font.load(doc, path.toIO)
 
 end ExtendedFonts
 
-// Create a new PDF document
-val document = new PDDocument()
-val page = new PDPage(PDRectangle.A4)
-document.addPage(page)
+trait FontMetrics:
+  def stringWidth(font: FontRef, text: String, fontSize: Int): Float
 
-val contentStream = new PDPageContentStream(document, page)
+final class PageBuilder(val size: PageSize = PageSize.A4):
+  private val elementsB = Vector.newBuilder[PageElement]
 
-object ExtendedFonts extends ExtendedFonts(document)
+  def text(font: FontRef, fontSize: Int, x: Float, y: Float)(steps: TextStep*): Unit =
+    elementsB += PageElement.Text(font, fontSize, x, y, steps.toVector)
 
-val monospaceFont =
-  if useInconsolata then ExtendedFonts.InconsolataRegular else Fonts.Courier
+  def line(
+      width: Float,
+      startX: Float,
+      startY: Float,
+      endX: Float,
+      endY: Float
+  ): Unit =
+    elementsB += PageElement.Line(width, startX, startY, endX, endY)
 
-def rightAlignText(font: PDFont, text: String, y: Int, size: Int = 10): Unit =
-  contentStream.beginText()
-  contentStream.setFont(font, size)
-  val textWidth = font.getStringWidth(text) / 1000 * size
-  contentStream.newLineAtOffset(550 - textWidth, y)
-  contentStream.showText(text)
-  contentStream.endText()
-
-// Start writing to the PDF
-contentStream.beginText()
-contentStream.setFont(Fonts.HelveticaBold, 16)
-contentStream.newLineAtOffset(50, 750)
-contentStream.showText("INVOICE")
-contentStream.endText()
-
-contentStream.beginText()
-contentStream.setFont(Fonts.Helvetica, 10)
-contentStream.newLineAtOffset(50, 730)
-contentStream.showText(conf.business.name)
-contentStream.newLineAtOffset(0, -15)
-contentStream.showText(conf.business.address)
-contentStream.newLineAtOffset(0, -15)
-contentStream.showText(conf.business.contact)
-contentStream.endText()
-
-rightAlignText(Fonts.HelveticaBold, s"Invoice No: ${invoiceCode}", 680)
-rightAlignText(
-  Fonts.Helvetica,
-  s"Issue Date: ${dateFormatter.format(startDate)}",
-  665
-)
-rightAlignText(
-  Fonts.Helvetica,
-  s"Due Date: ${dateFormatter.format(dueDate)}",
-  650
-)
+  def result(): LayoutPage =
+    LayoutPage(size, elementsB.result())
 
 def splitText(
     text: String,
     width: Int,
-    font: PDFont,
-    fontSize: Int
+    font: FontRef,
+    fontSize: Int,
+    fontMetrics: FontMetrics
 ): List[String] =
   val words = text.split(" ")
   val lines = List.newBuilder[String]
@@ -168,9 +181,11 @@ def splitText(
           currentLine = StringBuilder()
     else
       val currentWidth =
-        font.getStringWidth(
-          currentLine.toString + " " + word
-        ) / 1000 * fontSize
+        fontMetrics.stringWidth(
+          font,
+          currentLine.toString + " " + word,
+          fontSize
+        )
       if currentWidth > width then
         lines += currentLine.toString
         currentLine = StringBuilder()
@@ -179,64 +194,6 @@ def splitText(
   end for
   if currentLine.nonEmpty then lines += currentLine.toString
   lines.result()
-
-// Draw table grid
-contentStream.setLineWidth(0.5f)
-
-val lineBuckets =
-  items.map(item => splitText(item.description, 365 - 50, Fonts.Helvetica, 10))
-
-val rows = lineBuckets.flatten.size
-val rowHeight = 15
-val tableTopY = 640
-val tableOffset = 4
-val tableBottomY = tableTopY - ((rows + 1) * rowHeight)
-val tableStartX = 50
-val tableEndX = 550
-
-// Draw horizontal lines
-locally:
-  var i = 0
-  for bucketSize <- 1 +: lineBuckets.map(_.size) ++: Seq(1) do
-    val y = tableTopY - tableOffset - i * rowHeight
-    contentStream.moveTo(tableStartX, y)
-    contentStream.lineTo(tableEndX, y)
-    contentStream.stroke()
-    i += bucketSize
-  end for
-// Draw vertical lines
-val colPositions = List(50, 365, 415, 475, 550)
-colPositions.foreach { x =>
-  contentStream.moveTo(x, tableTopY - tableOffset)
-  contentStream.lineTo(x, tableBottomY - tableOffset)
-  contentStream.stroke()
-}
-
-// Table headers
-contentStream.beginText()
-contentStream.setFont(Fonts.HelveticaBold, 10)
-contentStream.newLineAtOffset(55, tableTopY - 15)
-contentStream.showText("Description")
-val (unitKind, perUnit) = ("Quantity", "Unit Price")
-contentStream.newLineAtOffset(315, 0)
-contentStream.showText(unitKind)
-contentStream.newLineAtOffset(50, 0)
-contentStream.showText(perUnit)
-contentStream.newLineAtOffset(60, 0)
-contentStream.showText("Total")
-contentStream.endText()
-
-var yPosition = tableTopY - rowHeight
-
-extension (cs: PDPageContentStream)
-  def pushLine(jumps: Int = 1, initial: Int = 0) =
-    val offset = jumps * 15
-    contentStream.newLineAtOffset(initial, -offset)
-    yPosition -= offset
-
-def rawPushLine(jumps: Int = 1) =
-  val offset = jumps * 15
-  yPosition -= offset
 
 def showMoney(value: BigDecimal, verbose: Boolean = false): String =
   val whole = value.setScale(0, RoundingMode.DOWN)
@@ -249,239 +206,313 @@ def showMoney(value: BigDecimal, verbose: Boolean = false): String =
     else s"$combined ${conf.currency.symbol} (${conf.currency.code})"
   else combined
 
-// Table content
-for (Order(_, quantity, unitPrice), desc) <- items.zip(lineBuckets) do
-  val total = quantity * unitPrice
+object InvoiceLayout:
+  private def rightAlignText(
+      page: PageBuilder,
+      fontMetrics: FontMetrics,
+      font: FontRef,
+      text: String,
+      y: Float,
+      size: Int = 10
+  ): Unit =
+    val textWidth = fontMetrics.stringWidth(font, text, size)
+    page.text(font, size, 550 - textWidth, y)(textStep(text))
 
-  contentStream.beginText()
-  contentStream.setFont(Fonts.Helvetica, 10)
-  contentStream.newLineAtOffset(55, yPosition - 15)
-  for firstDesc <- desc.headOption do contentStream.showText(firstDesc)
-  contentStream.newLineAtOffset(365 - 50, 0)
-  val qty = if conf.listings.useHours then s"$quantity hrs" else s"$quantity"
-  contentStream.showText(qty)
-  contentStream.newLineAtOffset(50, 0)
-  contentStream.showText(showMoney(unitPrice))
-  contentStream.newLineAtOffset(60, 0)
-  contentStream.showText(showMoney(total))
-  val otherDescRows = desc.tail
-  if otherDescRows.nonEmpty then
-    contentStream.newLineAtOffset(-425, 0)
-    for remaining <- desc.tail do
-      yPosition -= rowHeight
-      contentStream.newLineAtOffset(0, -15)
-      contentStream.showText(remaining)
-    end for
-  end if
-  contentStream.endText()
+  def build(fontMetrics: FontMetrics): LayoutDocument =
+    val firstPage = new PageBuilder()
 
-  yPosition -= rowHeight
-end for
-// Subtotal, Tax, and Total
-yPosition -= 15 // Extra space between the table and the following content
-contentStream.beginText()
-contentStream.setFont(Fonts.HelveticaBold, 10)
-contentStream.newLineAtOffset(50, yPosition)
-contentStream.showText(
-  s"Total Amount Due: ${showMoney(subtotal, verbose = true)}"
-)
-contentStream.endText()
-
-// Bill To
-yPosition -= 30 // More space between total and payment instructions
-contentStream.beginText()
-contentStream.setFont(Fonts.HelveticaBold, 10)
-contentStream.newLineAtOffset(50, yPosition)
-contentStream.showText(s"Bill To:")
-contentStream.endText()
-
-contentStream.beginText()
-contentStream.setFont(Fonts.Helvetica, 10)
-contentStream.newLineAtOffset(90, yPosition)
-contentStream.showText(conf.client.name)
-contentStream.endText()
-rawPushLine()
-contentStream.beginText()
-contentStream.setFont(Fonts.Helvetica, 10)
-contentStream.newLineAtOffset(50, yPosition)
-contentStream.showText(conf.client.address)
-conf.client.contactPerson.match
-  case Some(contactPerson) =>
-    contentStream.pushLine()
-    contentStream.showText(contactPerson)
-  case _ =>
-end match
-contentStream.endText()
-
-// Payment Instructions
-rawPushLine(jumps = 2) // More space between total and payment instructions
-contentStream.beginText()
-contentStream.setFont(Fonts.HelveticaBold, 10)
-contentStream.newLineAtOffset(50, yPosition)
-contentStream.showText("Payable to the following account:")
-contentStream.endText()
-
-rawPushLine() // space between payment instructions and bank details
-
-contentStream.beginText()
-contentStream.setFont(monospaceFont, 10)
-contentStream.newLineAtOffset(50, yPosition)
-contentStream.showText(s"Beneficiary: ${conf.bank.holder}")
-conf.bank.userAddress match
-  case Some(userAddress) =>
-    contentStream.pushLine()
-    contentStream.showText(s"Beneficiary Address: ${userAddress}")
-  case _ =>
-end match
-contentStream.pushLine()
-contentStream.showText(s"IBAN: ${conf.bank.account}")
-contentStream.pushLine()
-contentStream.showText(s"Recipient SWIFT/BIC: ${conf.bank.swift}")
-conf.bank.intermediary.match
-  case Some(intermediary) =>
-    contentStream.pushLine()
-    contentStream.showText(
-      s"Intermediary bank BIC: ${intermediary}"
+    firstPage.text(FontRef.HelveticaBold, 16, 50, 750)(textStep("INVOICE"))
+    firstPage.text(FontRef.Helvetica, 10, 50, 730)(
+      textStep(conf.business.name),
+      textStep(conf.business.address, dy = -15),
+      textStep(conf.business.contact, dy = -15)
     )
-  case None =>
-end match
-conf.bank.routing.match
-  case Some(routing) =>
-    contentStream.pushLine()
-    contentStream.showText(s"Routing number: ${routing}")
-  case _ =>
-contentStream.pushLine()
-contentStream.showText(s"Message for payee: ${invoiceCode}")
-contentStream.pushLine()
-contentStream.showText(s"Bank Name and Address: ${conf.bank.name}")
-contentStream.pushLine()
-contentStream.showText(conf.bank.address)
-contentStream.endText()
 
-conf.twint.match
-  case Some(twint) =>
-    rawPushLine(2)
-    contentStream.beginText()
-    contentStream.setFont(Fonts.HelveticaBold, 10)
-    contentStream.newLineAtOffset(50, yPosition)
-    contentStream.showText("Or pay with TWINT:")
-    contentStream.endText()
+    rightAlignText(
+      firstPage,
+      fontMetrics,
+      FontRef.HelveticaBold,
+      s"Invoice No: ${invoiceCode}",
+      680
+    )
+    rightAlignText(
+      firstPage,
+      fontMetrics,
+      FontRef.Helvetica,
+      s"Issue Date: ${dateFormatter.format(startDate)}",
+      665
+    )
+    rightAlignText(
+      firstPage,
+      fontMetrics,
+      FontRef.Helvetica,
+      s"Due Date: ${dateFormatter.format(dueDate)}",
+      650
+    )
 
-    // rawPushLine() // space between payment instructions and bank details
+    val lineBuckets = items.map(item =>
+      splitText(item.description, 365 - 50, FontRef.Helvetica, 10, fontMetrics)
+    )
 
-    contentStream.beginText()
-    contentStream.setFont(monospaceFont, 10)
-    contentStream.newLineAtOffset(165, yPosition)
-    contentStream.showText(twint)
-    contentStream.endText()
-  case _ =>
-end match
+    val rows = lineBuckets.flatten.size
+    val rowHeight = 15
+    val tableTopY = 640
+    val tableOffset = 4
+    val tableBottomY = tableTopY - ((rows + 1) * rowHeight)
+    val tableStartX = 50
+    val tableEndX = 550
 
-// Add description of appendices, add a single line separator if any exist
-
-val appendixTitles = ('A' to 'Z')
-  .to(LazyList)
-  .lazyZip(conf.appendices)
-  .map((letter, appendix) => s"Appendix $letter ($"${appendix.title}$")")
-
-if conf.appendices.nonEmpty then
-  rawPushLine()
-  contentStream.setLineWidth(0.5f)
-  contentStream.moveTo(50, yPosition)
-  contentStream.lineTo(550, yPosition)
-  contentStream.stroke()
-
-  rawPushLine() // space between line and appendices
-  contentStream.beginText()
-  contentStream.setFont(Fonts.HelveticaBold, 10)
-  contentStream.newLineAtOffset(50, yPosition)
-  contentStream.showText("Appendices:")
-  contentStream.endText()
-
-  rawPushLine() // space between appendices title and the list
-
-  for (appendix, idx) <- conf.appendices.zipWithIndex do
-    rawPushLine()
-    contentStream.beginText()
-    contentStream.setFont(Fonts.HelveticaOblique, 10)
-    contentStream.newLineAtOffset(50, yPosition)
-    contentStream.showText("[x] ")
-    contentStream.newLineAtOffset(15, 0)
-    contentStream.showText(appendixTitles(idx))
-    contentStream.pushLine()
-    contentStream.showText(appendix.description)
-    contentStream.endText()
-end if
-
-// Closing the content stream
-contentStream.close()
-
-// For each appendix, make a new page with the appendix content
-for (appendix, appendixIdx) <- conf.appendices.zipWithIndex do
-  val appendixPage = new PDPage(PDRectangle.A4)
-  document.addPage(appendixPage)
-  val contentStream2 = new PDPageContentStream(document, appendixPage)
-  // add title
-  contentStream2.beginText()
-  contentStream2.setFont(Fonts.HelveticaBold, 16)
-  contentStream2.newLineAtOffset(50, 750)
-  contentStream2.showText(appendixTitles(appendixIdx))
-  contentStream2.endText()
-  // list all of the sections
-  var yPosition = 750 - 20
-
-  contentStream2.beginText()
-  contentStream2.setFont(Fonts.HelveticaOblique, 10)
-  contentStream2.newLineAtOffset(50, yPosition)
-  contentStream2.showText(appendix.description)
-  contentStream2.endText()
-  yPosition -= 30
-
-  for (section, idx) <- appendix.sections.zipWithIndex do
-    contentStream2.beginText()
-    contentStream2.setFont(Fonts.HelveticaBold, 10)
-    contentStream2.newLineAtOffset(50, yPosition)
-    contentStream2.showText(section.title)
-    contentStream2.endText()
-    // add the content of the section, splitting lines by measuring the width of the text
-
-    val lines = splitText(section.desc, 500, Fonts.HelveticaOblique, 10)
-    for (line, idx) <- lines.zipWithIndex do
-      contentStream2.beginText()
-      contentStream2.setFont(Fonts.HelveticaOblique, 10)
-      contentStream2.newLineAtOffset(50, yPosition - 15 * (idx + 1))
-      contentStream2.showText(line)
-      contentStream2.endText()
-    end for
-    yPosition -= 15 * (lines.length + 1)
-
-    contentStream2.beginText()
-    contentStream2.setFont(Fonts.Helvetica, 10)
-    contentStream2.newLineAtOffset(50, yPosition)
-    contentStream2.showText(section.itemsTitle)
-    contentStream2.endText()
-    yPosition -= 15
-
-    // draw a table from the items in the section
-    for (id, desc) <- section.items do
-      contentStream2.beginText()
-      contentStream2.setFont(Fonts.Helvetica, 10)
-      contentStream2.newLineAtOffset(50, yPosition)
-      contentStream2.showText("-")
-      contentStream2.newLineAtOffset(10, 0)
-      val lines2 = splitText(s"$id: $desc", 450, Fonts.Helvetica, 10)
-      for (line, idx) <- lines2.zipWithIndex do
-        contentStream2.showText(line)
-        contentStream2.newLineAtOffset(0, -15)
+    locally:
+      var i = 0
+      for bucketSize <- 1 +: lineBuckets.map(_.size) ++: Seq(1) do
+        val y = tableTopY - tableOffset - i * rowHeight
+        firstPage.line(0.5f, tableStartX, y, tableEndX, y)
+        i += bucketSize
       end for
-      contentStream2.endText()
-      yPosition -= 15 * (lines2.length)
-      yPosition -= 5 // gap in list?
-  end for
-  contentStream2.close()
-end for
-// Saving the document
-document.save("Invoice.pdf")
-document.close()
+
+    val colPositions = List(50, 365, 415, 475, 550)
+    for x <- colPositions do
+      firstPage.line(
+        0.5f,
+        x,
+        tableTopY - tableOffset,
+        x,
+        tableBottomY - tableOffset
+      )
+
+    val (unitKind, perUnit) = ("Quantity", "Unit Price")
+    firstPage.text(FontRef.HelveticaBold, 10, 55, tableTopY - 15)(
+      textStep("Description"),
+      textStep(unitKind, dx = 315),
+      textStep(perUnit, dx = 50),
+      textStep("Total", dx = 60)
+    )
+
+    var yPosition = tableTopY - rowHeight
+
+    for (Order(_, quantity, unitPrice), desc) <- items.zip(lineBuckets) do
+      val total = quantity * unitPrice
+      val qty = if conf.listings.useHours then s"$quantity hrs" else s"$quantity"
+      val stepsB = Vector.newBuilder[TextStep]
+      for firstDesc <- desc.headOption do stepsB += textStep(firstDesc)
+      stepsB += textStep(qty, dx = 365 - 50)
+      stepsB += textStep(showMoney(unitPrice), dx = 50)
+      stepsB += textStep(showMoney(total), dx = 60)
+      val otherDescRows = desc.tail
+      if otherDescRows.nonEmpty then
+        stepsB += textStep(otherDescRows.head, dx = -425, dy = -15)
+        for remaining <- otherDescRows.tail do
+          stepsB += textStep(remaining, dy = -15)
+      end if
+      firstPage.text(FontRef.Helvetica, 10, 55, yPosition - 15)(
+        stepsB.result()*
+      )
+      yPosition -= rowHeight * desc.size
+    end for
+
+    yPosition -= 15
+    firstPage.text(FontRef.HelveticaBold, 10, 50, yPosition)(
+      textStep(s"Total Amount Due: ${showMoney(subtotal, verbose = true)}")
+    )
+
+    yPosition -= 30
+    firstPage.text(FontRef.HelveticaBold, 10, 50, yPosition)(
+      textStep("Bill To:")
+    )
+    firstPage.text(FontRef.Helvetica, 10, 90, yPosition)(
+      textStep(conf.client.name)
+    )
+
+    yPosition -= 15
+    val clientStepsB = Vector.newBuilder[TextStep]
+    clientStepsB += textStep(conf.client.address)
+    conf.client.contactPerson.foreach { contactPerson =>
+      clientStepsB += textStep(contactPerson, dy = -15)
+    }
+    firstPage.text(FontRef.Helvetica, 10, 50, yPosition)(clientStepsB.result()*)
+    if conf.client.contactPerson.nonEmpty then yPosition -= 15
+
+    yPosition -= 30
+    firstPage.text(FontRef.HelveticaBold, 10, 50, yPosition)(
+      textStep("Payable to the following account:")
+    )
+
+    yPosition -= 15
+    val bankStepsB = Vector.newBuilder[TextStep]
+    bankStepsB += textStep(s"Beneficiary: ${conf.bank.holder}")
+    conf.bank.userAddress.foreach { userAddress =>
+      bankStepsB += textStep(s"Beneficiary Address: ${userAddress}", dy = -15)
+    }
+    bankStepsB += textStep(s"IBAN: ${conf.bank.account}", dy = -15)
+    bankStepsB += textStep(s"Recipient SWIFT/BIC: ${conf.bank.swift}", dy = -15)
+    conf.bank.intermediary.foreach { intermediary =>
+      bankStepsB += textStep(s"Intermediary bank BIC: ${intermediary}", dy = -15)
+    }
+    conf.bank.routing.foreach { routing =>
+      bankStepsB += textStep(s"Routing number: ${routing}", dy = -15)
+    }
+    bankStepsB += textStep(s"Message for payee: ${invoiceCode}", dy = -15)
+    bankStepsB += textStep(s"Bank Name and Address: ${conf.bank.name}", dy = -15)
+    bankStepsB += textStep(conf.bank.address, dy = -15)
+    val bankSteps = bankStepsB.result()
+    firstPage.text(FontRef.Monospace, 10, 50, yPosition)(bankSteps*)
+    yPosition -= 15 * (bankSteps.size - 1)
+
+    conf.twint.foreach { twint =>
+      yPosition -= 30
+      firstPage.text(FontRef.HelveticaBold, 10, 50, yPosition)(
+        textStep("Or pay with TWINT:")
+      )
+      firstPage.text(FontRef.Monospace, 10, 165, yPosition)(textStep(twint))
+    }
+
+    if conf.appendices.nonEmpty then
+      yPosition -= 15
+      firstPage.line(0.5f, 50, yPosition, 550, yPosition)
+
+      yPosition -= 15
+      firstPage.text(FontRef.HelveticaBold, 10, 50, yPosition)(
+        textStep("Appendices:")
+      )
+
+      yPosition -= 15
+      for (appendix, idx) <- conf.appendices.zipWithIndex do
+        yPosition -= 15
+        firstPage.text(FontRef.HelveticaOblique, 10, 50, yPosition)(
+          textStep("[x] "),
+          textStep(appendixTitles(idx), dx = 15),
+          textStep(appendix.description, dy = -15)
+        )
+        yPosition -= 15
+      end for
+    end if
+
+    val appendixPages =
+      conf.appendices.zipWithIndex.map { (appendix, appendixIdx) =>
+        val appendixPage = new PageBuilder()
+        appendixPage.text(FontRef.HelveticaBold, 16, 50, 750)(
+          textStep(appendixTitles(appendixIdx))
+        )
+
+        var appendixY = 750 - 20
+        appendixPage.text(FontRef.HelveticaOblique, 10, 50, appendixY)(
+          textStep(appendix.description)
+        )
+        appendixY -= 30
+
+        for section <- appendix.sections do
+          appendixPage.text(FontRef.HelveticaBold, 10, 50, appendixY)(
+            textStep(section.title)
+          )
+
+          val lines =
+            splitText(section.desc, 500, FontRef.HelveticaOblique, 10, fontMetrics)
+          for (line, idx) <- lines.zipWithIndex do
+            appendixPage.text(
+              FontRef.HelveticaOblique,
+              10,
+              50,
+              appendixY - 15 * (idx + 1)
+            )(textStep(line))
+          end for
+          appendixY -= 15 * (lines.length + 1)
+
+          appendixPage.text(FontRef.Helvetica, 10, 50, appendixY)(
+            textStep(section.itemsTitle)
+          )
+          appendixY -= 15
+
+          for (id, desc) <- section.items do
+            val lines2 =
+              splitText(s"$id: $desc", 450, FontRef.Helvetica, 10, fontMetrics)
+            val itemStepsB = Vector.newBuilder[TextStep]
+            itemStepsB += textStep("-")
+            lines2.headOption.foreach { firstLine =>
+              itemStepsB += textStep(firstLine, dx = 10)
+            }
+            for line <- lines2.tail do
+              itemStepsB += textStep(line, dy = -15)
+            end for
+            appendixPage.text(FontRef.Helvetica, 10, 50, appendixY)(
+              itemStepsB.result()*
+            )
+            appendixY -= 15 * lines2.length
+            appendixY -= 5
+          end for
+        end for
+
+        appendixPage.result()
+      }
+
+    LayoutDocument(Vector(firstPage.result()) ++ appendixPages)
+
+object PdfRenderer:
+  private final class PdfFontCatalog(document: PDDocument, useInconsolata: Boolean)
+      extends ExtendedFonts(document),
+        FontMetrics:
+
+    private lazy val monospaceFont =
+      if useInconsolata then InconsolataRegular else Fonts.Courier
+
+    def pdfFont(font: FontRef): PDFont =
+      font match
+        case FontRef.Helvetica         => Fonts.Helvetica
+        case FontRef.HelveticaBold     => Fonts.HelveticaBold
+        case FontRef.HelveticaOblique  => Fonts.HelveticaOblique
+        case FontRef.Courier           => Fonts.Courier
+        case FontRef.TimesRoman        => Fonts.TimesRoman
+        case FontRef.Monospace         => monospaceFont
+
+    def stringWidth(font: FontRef, text: String, fontSize: Int): Float =
+      pdfFont(font).getStringWidth(text) / 1000 * fontSize
+
+  private def rectangle(pageSize: PageSize): PDRectangle =
+    pageSize match
+      case PageSize.A4 => PDRectangle.A4
+
+  private def renderPage(
+      document: PDDocument,
+      pageLayout: LayoutPage,
+      fonts: PdfFontCatalog
+  ): Unit =
+    val page = new PDPage(rectangle(pageLayout.size))
+    document.addPage(page)
+
+    val contentStream = new PDPageContentStream(document, page)
+    try
+      for element <- pageLayout.elements do
+        element match
+          case PageElement.Text(font, fontSize, x, y, steps) =>
+            contentStream.beginText()
+            contentStream.setFont(fonts.pdfFont(font), fontSize)
+            contentStream.newLineAtOffset(x, y)
+            for step <- steps do
+              if step.dx != 0 || step.dy != 0 then
+                contentStream.newLineAtOffset(step.dx, step.dy)
+              contentStream.showText(step.text)
+            end for
+            contentStream.endText()
+          case PageElement.Line(width, startX, startY, endX, endY) =>
+            contentStream.setLineWidth(width)
+            contentStream.moveTo(startX, startY)
+            contentStream.lineTo(endX, endY)
+            contentStream.stroke()
+    finally contentStream.close()
+
+  def render(
+      outputPath: os.Path,
+      useInconsolata: Boolean
+  )(buildLayout: FontMetrics => LayoutDocument): Unit =
+    val document = new PDDocument()
+    try
+      val fonts = new PdfFontCatalog(document, useInconsolata)
+      val layout = buildLayout(fonts)
+      for pageLayout <- layout.pages do
+        renderPage(document, pageLayout, fonts)
+      end for
+      document.save(outputPath.toIO)
+    finally document.close()
+
+PdfRenderer.render(os.pwd / "Invoice.pdf", useInconsolata)(InvoiceLayout.build)
 
 Logger.info("Invoice created successfully.")

@@ -54,6 +54,54 @@ final class PageBuilder(val size: PageSize = PageSize.A4):
   def result(): LayoutPage =
     LayoutPage(size, elementsB.result())
 
+enum WrapToken:
+  case Segment(text: String, width: Float)
+  case Break
+
+def tokenizeText(
+    text: String,
+    font: FontRef,
+    fontSize: Int,
+    fontMetrics: FontMetrics
+): Vector[WrapToken] =
+  val space = " "
+  val spaceWidth = fontMetrics.stringWidth(font, space, fontSize)
+  if text.isEmpty then return Vector(WrapToken.Segment(space, spaceWidth))
+  val tokens = Vector.newBuilder[WrapToken]
+  var idx = 0
+  var afterBreak = false
+  while idx < text.length do
+    text.charAt(idx) match
+      case '\n' =>
+        tokens += WrapToken.Break
+        afterBreak = true
+        idx += 1
+      case ' ' =>
+        if afterBreak then afterBreak = false
+        else tokens += WrapToken.Segment(space, spaceWidth)
+        idx += 1
+      case _ =>
+        afterBreak = false
+        val start = idx
+        while idx < text.length && text.charAt(idx) != ' ' && text.charAt(idx) != '\n' do
+          idx += 1
+        val word = text.substring(start, idx)
+        val wordWidth = fontMetrics.stringWidth(font, word, fontSize)
+        if idx >= text.length then
+          tokens += WrapToken.Segment(word + space, wordWidth + spaceWidth)
+        else
+          text.charAt(idx) match
+            case '\n' =>
+              tokens += WrapToken.Segment(word, wordWidth)
+            case ' ' =>
+              tokens += WrapToken.Segment(word + space, wordWidth + spaceWidth)
+              idx += 1
+              while idx < text.length && text.charAt(idx) == ' ' do
+                tokens += WrapToken.Segment(space, spaceWidth)
+                idx += 1
+              end while
+  tokens.result()
+
 def splitText(
     text: String,
     width: Int,
@@ -61,99 +109,164 @@ def splitText(
     fontSize: Int,
     fontMetrics: FontMetrics
 ): List[String] =
-  val words = text.split(" ")
   val lines = List.newBuilder[String]
   var currentLine = StringBuilder()
-  for word <- words do
-    if word.contains("\u000A") then
-      word.split("\u000A") match
-        case Array(lastWord, initNext) =>
-          lines += (currentLine ++= lastWord).toString
-          currentLine = StringBuilder() ++= initNext ++= " "
-        case Array(lastWord) =>
-          lines += (currentLine ++= lastWord).toString
-          currentLine = StringBuilder()
-        case Array() =>
-          lines += currentLine.toString
-          currentLine = StringBuilder()
-    else
-      val currentWidth =
-        fontMetrics.stringWidth(
-          font,
-          currentLine.toString + " " + word,
-          fontSize
-        )
-      if currentWidth > width then
+  var currentLineWidth = 0f
+  for token <- tokenizeText(text, font, fontSize, fontMetrics) do
+    token match
+      case WrapToken.Break =>
         lines += currentLine.toString
         currentLine = StringBuilder()
-      end if
-      currentLine ++= word ++ " "
+        currentLineWidth = 0f
+      case WrapToken.Segment(text, tokenWidth) =>
+        if currentLine.nonEmpty && currentLineWidth + tokenWidth > width then
+          lines += currentLine.toString
+          currentLine = StringBuilder()
+          currentLineWidth = 0f
+        end if
+        currentLine ++= text
+        currentLineWidth += tokenWidth
   end for
   if currentLine.nonEmpty then lines += currentLine.toString
   lines.result()
 
-case class TextStyle(font: FontRef, size: Int, lineHeight: Float = 15)
+enum CssLength:
+  case Px(value: Float)
+  case Lh(value: Float)
 
-enum HorizontalAnchor:
-  case Left(x: Float)
-  case Right(rightEdge: Float)
+  def resolve(lineHeight: Float): Float =
+    this match
+      case CssLength.Px(value) => value
+      case CssLength.Lh(value) => value * lineHeight
 
-case class FixedText(
-    anchor: HorizontalAnchor,
-    y: Float,
-    style: TextStyle,
-    steps: Vector[TextStep]
-)
+object CssLength:
+  val Zero: CssLength = CssLength.Px(0)
 
-case class FlowText(x: Float, style: TextStyle, steps: Vector[TextStep])
+enum TextAlign:
+  case Left
+  case Right
 
-case class TableColumn(
-    header: String,
-    width: Float,
-    wrapWidth: Option[Int] = None
-)
+enum WhiteSpace:
+  case NoWrap
+  case Wrap
 
-case class TableCell(text: String, wrap: Boolean = false)
+enum FontFamily:
+  case Helvetica
+  case Courier
+  case Times
+  case Monospace
+
+enum FontWeight:
+  case Normal
+  case Bold
+
+enum FontStyle:
+  case Normal
+  case Italic
+
+case class Style(
+    marginTop: CssLength = CssLength.Zero,
+    marginBottom: CssLength = CssLength.Zero,
+    marginLeft: CssLength = CssLength.Zero,
+    width: Option[CssLength] = None,
+    paddingLeft: CssLength = CssLength.Zero,
+    gap: CssLength = CssLength.Zero,
+    textAlign: TextAlign = TextAlign.Left,
+    whiteSpace: WhiteSpace = WhiteSpace.NoWrap,
+    fontFamily: FontFamily = FontFamily.Helvetica,
+    fontSize: Int = 10,
+    fontWeight: FontWeight = FontWeight.Normal,
+    fontStyle: FontStyle = FontStyle.Normal,
+    lineHeight: Float = 15,
+    borderWidth: Float = 0.5f,
+    marker: String = "-"
+):
+  def resolveMarginTop(): Float =
+    marginTop.resolve(lineHeight)
+
+  def resolveMarginBottom(): Float =
+    marginBottom.resolve(lineHeight)
+
+  def resolveMarginLeft(): Float =
+    marginLeft.resolve(lineHeight)
+
+  def resolveWidth(): Option[Float] =
+    width.map(_.resolve(lineHeight))
+
+  def resolvePaddingLeft(): Float =
+    paddingLeft.resolve(lineHeight)
+
+  def resolveGap(): Float =
+    gap.resolve(lineHeight)
+
+  def fontRef: FontRef =
+    fontFamily match
+      case FontFamily.Helvetica =>
+        (fontWeight, fontStyle) match
+          case (FontWeight.Bold, FontStyle.Normal) => FontRef.HelveticaBold
+          case (_, FontStyle.Italic)               => FontRef.HelveticaOblique
+          case _                                   => FontRef.Helvetica
+      case FontFamily.Courier =>
+        FontRef.Courier
+      case FontFamily.Times =>
+        FontRef.TimesRoman
+      case FontFamily.Monospace =>
+        FontRef.Monospace
+
+  def textOnly: Style =
+    copy(
+      marginTop = CssLength.Zero,
+      marginBottom = CssLength.Zero,
+      marginLeft = CssLength.Zero,
+      width = None,
+      paddingLeft = CssLength.Zero,
+      gap = CssLength.Zero,
+      textAlign = TextAlign.Left,
+      whiteSpace = WhiteSpace.NoWrap,
+      borderWidth = 0.5f,
+      marker = "-"
+    )
+
+object Style:
+  extension (value: Int)
+    def px: CssLength =
+      CssLength.Px(value.toFloat)
+
+    def lh: CssLength =
+      CssLength.Lh(value.toFloat)
+
+  extension (value: Float)
+    def px: CssLength =
+      CssLength.Px(value)
+
+    def lh: CssLength =
+      CssLength.Lh(value)
+
+case class FlowText(style: Style, lines: Vector[String])
+
+case class TableColumn(header: String, style: Style)
+
+case class TableCell(text: String)
 
 case class TableRow(cells: Vector[TableCell])
 
 case class TableSpec(
     columns: Vector[TableColumn],
-    headerStyle: TextStyle,
-    bodyStyle: TextStyle,
-    rows: Vector[TableRow],
-    lineWidth: Float = 0.5f,
-    rowHeight: Float = 15,
-    gridOffsetY: Float = 4,
-    textInsetX: Float = 5
+    headerStyle: Style,
+    bodyStyle: Style,
+    rows: Vector[TableRow]
 )
 
-case class BulletListSpec(
-    style: TextStyle,
-    width: Int,
-    items: Vector[String],
-    x: Float = 0,
-    bullet: String = "-",
-    bulletGap: Float = 10,
-    itemGap: Float = 5
-)
+case class BulletListSpec(itemStyle: Style, items: Vector[String])
 
 enum FlowBlock:
-  case Gap(height: Float)
-  case Row(texts: Vector[FlowText])
-  case WrappedText(x: Float, width: Int, style: TextStyle, text: String)
-  case Rule(startX: Float = 0, endX: Float = 500, width: Float = 0.5f)
-  case Table(spec: TableSpec)
-  case BulletList(spec: BulletListSpec)
+  case Stack(style: Style, children: Vector[FlowBlock])
+  case Row(style: Style, texts: Vector[FlowText])
+  case Rule(style: Style)
+  case Table(style: Style, spec: TableSpec)
+  case BulletList(style: Style, spec: BulletListSpec)
 
-case class FlowRegion(x: Float, topY: Float, blocks: Vector[FlowBlock])
-
-case class PageSpec(
-    size: PageSize = PageSize.A4,
-    fixed: Vector[FixedText] = Vector.empty,
-    flows: Vector[FlowRegion] = Vector.empty
-)
-
+case class PageSpec(size: PageSize = PageSize.A4, blocks: Vector[FlowBlock])
 case class DocumentSpec(pages: Vector[PageSpec])
 
 object Html:
@@ -167,83 +280,49 @@ object Html:
       case None =>
         Vector.empty
 
-  def txt(content: String, dx: Float = 0, dy: Float = 0): TextStep =
-    textStep(content, dx = dx, dy = dy)
-
-  def fixedLeft(x: Float, y: Float, style: TextStyle)(lines: String*): FixedText =
-    FixedText(
-      HorizontalAnchor.Left(x),
-      y,
-      style,
-      stepsForLines(lines, style.lineHeight)
-    )
-
-  def fixedRight(
-      rightEdge: Float,
-      y: Float,
-      style: TextStyle,
-      text: String
-  ): FixedText =
-    FixedText(
-      HorizontalAnchor.Right(rightEdge),
-      y,
-      style,
-      Vector(textStep(text))
-    )
-
-  def span(style: TextStyle, x: Float = 0)(steps: TextStep*): FlowText =
-    FlowText(x, style, steps.toVector)
+  def span(style: Style = Style())(lines: String*): FlowText =
+    FlowText(style, lines.toVector)
 
   def row(texts: FlowText*): Fragment =
-    Vector(FlowBlock.Row(texts.toVector))
+    row(Style())(texts*)
+
+  def row(style: Style = Style())(texts: FlowText*): Fragment =
+    Vector(FlowBlock.Row(style, texts.toVector))
 
   def div(children: Fragment*): Fragment =
-    children.foldLeft(Vector.empty[FlowBlock])(_ ++ _)
+    div(Style())(children*)
 
-  def p(style: TextStyle, x: Float = 0)(lines: String*): Fragment =
-    row(FlowText(x, style, stepsForLines(lines, style.lineHeight)))
+  def div(style: Style = Style())(children: Fragment*): Fragment =
+    Vector(FlowBlock.Stack(style, children.iterator.flatMap(_.iterator).toVector))
 
-  def wrapped(style: TextStyle, width: Int, x: Float = 0)(text: String): Fragment =
-    Vector(FlowBlock.WrappedText(x, width, style, text))
+  def p(style: Style)(lines: String*): Fragment =
+    row(style)(FlowText(style.textOnly, lines.toVector))
 
-  def gap(height: Float): Fragment =
-    Vector(FlowBlock.Gap(height))
+  def hr(style: Style = Style()): Fragment =
+    Vector(FlowBlock.Rule(style))
 
-  def hr(
-      startX: Float = 0,
-      endX: Float = 500,
-      width: Float = 0.5f
-  ): Fragment =
-    Vector(FlowBlock.Rule(startX, endX, width))
+  def th(header: String, style: Style): TableColumn =
+    TableColumn(header, style)
 
-  def th(header: String, width: Float, wrapWidth: Option[Int] = None): TableColumn =
-    TableColumn(header, width, wrapWidth)
-
-  def td(text: String, wrap: Boolean = false): TableCell =
-    TableCell(text, wrap)
+  def td(text: String): TableCell =
+    TableCell(text)
 
   def tr(cells: TableCell*): TableRow =
     TableRow(cells.toVector)
 
   def table(
-      headerStyle: TextStyle,
-      bodyStyle: TextStyle,
-      lineWidth: Float = 0.5f,
-      rowHeight: Float = 15,
-      gridOffsetY: Float = 4,
-      textInsetX: Float = 5
+      headerStyle: Style,
+      bodyStyle: Style,
+      style: Style = Style()
   )(columns: TableColumn*)(rows: TableRow*): Fragment =
     Vector(
       FlowBlock.Table(
+        style,
         TableSpec(
           columns = columns.toVector,
           headerStyle = headerStyle,
           bodyStyle = bodyStyle,
-          rows = rows.toVector,
-          lineWidth = lineWidth,
-          rowHeight = rowHeight,
-          gridOffsetY = gridOffsetY,
-          textInsetX = textInsetX
+          rows = rows.toVector
         )
       )
     )
@@ -252,86 +331,173 @@ object Html:
     text
 
   def ul(
-      style: TextStyle,
-      width: Int,
-      x: Float = 0,
-      bullet: String = "-",
-      bulletGap: Float = 10,
-      itemGap: Float = 5
+      itemStyle: Style,
+      style: Style = Style()
   )(items: String*): Fragment =
     Vector(
       FlowBlock.BulletList(
+        style,
         BulletListSpec(
-          style = style,
-          width = width,
-          items = items.toVector,
-          x = x,
-          bullet = bullet,
-          bulletGap = bulletGap,
-          itemGap = itemGap
+          itemStyle = itemStyle,
+          items = items.toVector
         )
       )
     )
 
-  def body(topY: Float, x: Float = 50)(children: Fragment*): FlowRegion =
-    FlowRegion(x = x, topY = topY, blocks = div(children*))
-
-  def page(
-      size: PageSize = PageSize.A4,
-      fixed: Seq[FixedText] = Seq.empty
-  )(regions: FlowRegion*): PageSpec =
-    PageSpec(size = size, fixed = fixed.toVector, flows = regions.toVector)
+  def page(size: PageSize = PageSize.A4)(blocks: Fragment*): PageSpec =
+    PageSpec(size, blocks.iterator.flatMap(_.iterator).toVector)
 
   def document(pages: PageSpec*): DocumentSpec =
     DocumentSpec(pages.toVector)
 
 object LayoutCompiler:
-  private def textDepth(steps: Vector[TextStep]): Float =
-    var offsetY = 0f
-    var minY = 0f
-    for step <- steps do
-      offsetY += step.dy
-      if offsetY < minY then minY = offsetY
-    -minY
+  private val DefaultPageOriginX = 50f
+  private val DefaultPageOriginY = 750f
+  private val DefaultRuleWidth = 500f
+  private val DefaultTableTextInsetX = 5f
+  private val DefaultTableGridOffsetY = 4f
+  private val DefaultListBulletGap = 10f
+  private val DefaultListItemGap = 5f
+
+  private case class PreparedText(
+      style: Style,
+      lines: Vector[String],
+      firstLineWidth: Float,
+      depth: Float
+  )
+
+  private def linesDepth(lines: Vector[String], lineHeight: Float): Float =
+    if lines.size <= 1 then 0f
+    else lineHeight * (lines.size - 1)
 
   private def emitText(
       page: PageBuilder,
       x: Float,
       y: Float,
-      style: TextStyle,
+      style: Style,
       steps: Vector[TextStep]
   ): Unit =
     if steps.nonEmpty then
-      page.text(style.font, style.size, x, y)(steps*)
+      page.text(style.fontRef, style.fontSize, x, y)(steps*)
 
-  private def anchoredX(fixed: FixedText, fontMetrics: FontMetrics): Float =
-    fixed.anchor match
-      case HorizontalAnchor.Left(x) =>
-        x
-      case HorizontalAnchor.Right(rightEdge) =>
-        val firstText = fixed.steps.headOption.map(_.text).getOrElse("")
-        rightEdge - fontMetrics.stringWidth(
-          fixed.style.font,
-          firstText,
-          fixed.style.size
-        )
+  private def requireWidth(style: Style, owner: String): Int =
+    style.resolveWidth().map(_.toInt).getOrElse(sys.error(s"$owner requires Style.width"))
+
+  private def resolvedStartY(style: Style, currentY: Float): Float = currentY - style.resolveMarginTop()
+
+  private def resolvedBaseX(style: Style, baseX: Float): Float = baseX + style.resolveMarginLeft()
+
+  private def resolvedOrDefault(length: CssLength, lineHeight: Float, default: Float): Float =
+    if length == CssLength.Zero then default else length.resolve(lineHeight)
+
+  private def lineWidth(style: Style, line: String, fontMetrics: FontMetrics): Float =
+    fontMetrics.stringWidth(style.fontRef, line, style.fontSize)
+
+  private def rightAlignedText(
+      style: Style,
+      lines: Vector[String],
+      rightEdge: Float,
+      fontMetrics: FontMetrics
+  ): (Float, Vector[TextStep]) =
+    val head = lines.head
+    val firstX = rightEdge - lineWidth(style, head, fontMetrics)
+    val stepsB = Vector.newBuilder[TextStep]
+    stepsB += textStep(head)
+
+    var previousX = firstX
+    for line <- lines.tail do
+      val x = rightEdge - lineWidth(style, line, fontMetrics)
+      stepsB += textStep(line, dx = x - previousX, dy = -style.lineHeight)
+      previousX = x
+    end for
+
+    (firstX, stepsB.result())
+
+  private def rowFirstLineWidth(
+      texts: Vector[PreparedText]
+  ): Float =
+    var maxX = 0f
+    for text <- texts do
+      val startX = text.style.resolveMarginLeft()
+      maxX = maxX.max(startX + text.firstLineWidth)
+    maxX
+
+  private def inheritStyle(style: Style, containerStyle: Style): Style =
+    style.copy(
+      width = style.width.orElse(containerStyle.width),
+      textAlign =
+        if style.textAlign == TextAlign.Left then containerStyle.textAlign
+        else style.textAlign,
+      whiteSpace =
+        if style.whiteSpace == WhiteSpace.NoWrap then containerStyle.whiteSpace
+        else style.whiteSpace
+    )
+
+  private def sameTypography(left: Style, right: Style): Boolean =
+    left.fontRef == right.fontRef && left.fontSize == right.fontSize && left.lineHeight == right.lineHeight
+
+  private def resolvedTextLines(
+      style: Style,
+      lines: Vector[String],
+      owner: String,
+      fontMetrics: FontMetrics
+  ): Vector[String] =
+    style.whiteSpace match
+      case WhiteSpace.NoWrap =>
+        lines
+      case WhiteSpace.Wrap =>
+        lines.flatMap { line =>
+          splitText(
+            line,
+            requireWidth(style, owner),
+            style.fontRef,
+            style.fontSize,
+            fontMetrics
+          )
+        }
+
+  private def prepareText(
+      rowStyle: Style,
+      text: FlowText,
+      fontMetrics: FontMetrics
+  ): PreparedText =
+    val style = inheritStyle(text.style, rowStyle)
+    val lines = resolvedTextLines(style, text.lines, "FlowText", fontMetrics)
+    PreparedText(
+      style = style,
+      lines = lines,
+      firstLineWidth = lines.headOption.map(lineWidth(style, _, fontMetrics)).getOrElse(0f),
+      depth = linesDepth(lines, style.lineHeight)
+    )
 
   private def compileTable(
       page: PageBuilder,
       baseX: Float,
       topY: Float,
+      style: Style,
       spec: TableSpec,
       fontMetrics: FontMetrics
   ): Float =
-    val colBoundaries = spec.columns.scanLeft(0f)(_ + _.width).toVector
+    val rowHeight = spec.bodyStyle.lineHeight
+    val lineWidth = style.borderWidth
+    val textInsetX = resolvedOrDefault(
+      style.paddingLeft,
+      style.lineHeight,
+      DefaultTableTextInsetX
+    )
+
+    val colBoundaries =
+      spec.columns.scanLeft(0f) { (sum, column) =>
+        sum + requireWidth(column.style, "TableColumn")
+      }.toVector
     val colStarts = colBoundaries.init
     val totalWidth = colBoundaries.lastOption.getOrElse(0f)
-    val headerY = topY - spec.rowHeight
+    val headerY = topY - rowHeight
 
     for (column, x) <- spec.columns.zip(colStarts) do
       emitText(
         page,
-        baseX + x + spec.textInsetX,
+        baseX + x + textInsetX,
         headerY,
         spec.headerStyle,
         Vector(textStep(column.header))
@@ -340,76 +506,91 @@ object LayoutCompiler:
     val rowLines =
       spec.rows.map { row =>
         row.cells.zip(spec.columns).map { (cell, column) =>
-          if cell.wrap then
-            splitText(
-              cell.text,
-              column.wrapWidth.getOrElse(column.width.toInt),
-              spec.bodyStyle.font,
-              spec.bodyStyle.size,
-              fontMetrics
-            )
-          else List(cell.text)
+          column.style.whiteSpace match
+            case WhiteSpace.Wrap =>
+              splitText(
+                cell.text,
+                requireWidth(column.style, "TableColumn"),
+                spec.bodyStyle.fontRef,
+                spec.bodyStyle.fontSize,
+                fontMetrics
+              )
+            case WhiteSpace.NoWrap =>
+              List(cell.text)
         }
       }
 
     val rowHeights = rowLines.map(_.map(_.size).maxOption.getOrElse(1))
-    val tableBottomY = topY - ((rowHeights.sum + 1) * spec.rowHeight)
+    val tableBottomY = topY - (rowHeights.sum + 1) * rowHeight
 
     locally:
       var i = 0
       for bucketSize <- 1 +: rowHeights ++: Seq(1) do
-        val y = topY - spec.gridOffsetY - i * spec.rowHeight
-        page.line(spec.lineWidth, baseX, y, baseX + totalWidth, y)
+        val y = topY - DefaultTableGridOffsetY - i * rowHeight
+        page.line(lineWidth, baseX, y, baseX + totalWidth, y)
         i += bucketSize
       end for
 
     for x <- colBoundaries do
       page.line(
-        spec.lineWidth,
+        lineWidth,
         baseX + x,
-        topY - spec.gridOffsetY,
+        topY - DefaultTableGridOffsetY,
         baseX + x,
-        tableBottomY - spec.gridOffsetY
+        tableBottomY - DefaultTableGridOffsetY
       )
 
-    var rowY = topY - (spec.rowHeight * 2)
+    var rowY = topY - (rowHeight * 2)
     for (cells, rowHeightUnits) <- rowLines.zip(rowHeights) do
-      for ((cellLines, _), x) <- cells.zip(spec.columns).zip(colStarts) do
+      for (cellLines, x) <- cells.zip(colStarts) do
         emitText(
           page,
-          baseX + x + spec.textInsetX,
+          baseX + x + textInsetX,
           rowY,
           spec.bodyStyle,
           Html.stepsForLines(cellLines, spec.bodyStyle.lineHeight)
         )
       end for
-      rowY -= spec.rowHeight * rowHeightUnits
+      rowY -= rowHeight * rowHeightUnits
     end for
 
-    spec.rowHeight * (rowHeights.sum + 1)
+    rowHeight * (rowHeights.sum + 1)
 
   private def compileBulletList(
       page: PageBuilder,
       baseX: Float,
       topY: Float,
+      style: Style,
       spec: BulletListSpec,
       fontMetrics: FontMetrics
   ): Float =
+    val width = requireWidth(style, "BulletList")
+    val bulletGap =
+      resolvedOrDefault(style.paddingLeft, style.lineHeight, DefaultListBulletGap)
+    val itemGap =
+      resolvedOrDefault(style.gap, style.lineHeight, DefaultListItemGap)
+
     var currentY = topY
     for item <- spec.items do
       val lines =
-        splitText(item, spec.width, spec.style.font, spec.style.size, fontMetrics)
+        splitText(
+          item,
+          width,
+          spec.itemStyle.fontRef,
+          spec.itemStyle.fontSize,
+          fontMetrics
+        )
       val stepsB = Vector.newBuilder[TextStep]
-      stepsB += textStep(spec.bullet)
+      stepsB += textStep(style.marker)
       lines.headOption.foreach { firstLine =>
-        stepsB += textStep(firstLine, dx = spec.bulletGap)
+        stepsB += textStep(firstLine, dx = bulletGap)
       }
       for line <- lines.tail do
-        stepsB += textStep(line, dy = -spec.style.lineHeight)
+        stepsB += textStep(line, dy = -spec.itemStyle.lineHeight)
       end for
-      emitText(page, baseX + spec.x, currentY, spec.style, stepsB.result())
-      currentY -= spec.style.lineHeight * lines.length
-      currentY -= spec.itemGap
+      emitText(page, baseX, currentY, spec.itemStyle, stepsB.result())
+      currentY -= spec.itemStyle.lineHeight * lines.length
+      currentY -= itemGap
     end for
     topY - currentY
 
@@ -418,60 +599,130 @@ object LayoutCompiler:
       baseX: Float,
       currentY: Float,
       block: FlowBlock,
+      inheritedStyle: Option[Style],
       fontMetrics: FontMetrics
   ): Float =
     block match
-      case FlowBlock.Gap(height) =>
-        currentY - height
-      case FlowBlock.Row(texts) =>
-        var maxDepth = 0f
-        for text <- texts do
-          emitText(page, baseX + text.x, currentY, text.style, text.steps)
-          maxDepth = maxDepth.max(textDepth(text.steps))
+      case FlowBlock.Stack(style, children) =>
+        val resolvedStyle = inheritedStyle.fold(style)(inheritStyle(style, _))
+        var nextY = resolvedStartY(resolvedStyle, currentY)
+        val childBaseX = resolvedBaseX(resolvedStyle, baseX)
+        for (child, idx) <- children.zipWithIndex do
+          nextY = compileFlowBlock(
+            page,
+            childBaseX,
+            nextY,
+            child,
+            Some(resolvedStyle),
+            fontMetrics
+          )
+          if idx < children.size - 1 then nextY -= resolvedStyle.resolveGap()
         end for
-        currentY - maxDepth
-      case FlowBlock.WrappedText(x, width, style, text) =>
-        val lines = splitText(text, width, style.font, style.size, fontMetrics)
-        compileFlowBlock(
-          page,
-          baseX,
-          currentY,
-          FlowBlock.Row(
-            Vector(FlowText(x, style, Html.stepsForLines(lines, style.lineHeight)))
-          ),
-          fontMetrics
-        )
-      case FlowBlock.Rule(startX, endX, width) =>
-        page.line(width, baseX + startX, currentY, baseX + endX, currentY)
-        currentY
-      case FlowBlock.Table(spec) =>
-        currentY - compileTable(page, baseX, currentY, spec, fontMetrics)
-      case FlowBlock.BulletList(spec) =>
-        currentY - compileBulletList(page, baseX, currentY, spec, fontMetrics)
+        nextY - resolvedStyle.resolveMarginBottom()
+      case FlowBlock.Row(style, texts) =>
+        val resolvedStyle = inheritedStyle.fold(style)(inheritStyle(style, _))
+        val y = resolvedStartY(resolvedStyle, currentY)
+        val rawBaseX = resolvedBaseX(resolvedStyle, baseX)
+        val preparedTexts = texts.map(prepareText(resolvedStyle, _, fontMetrics))
+        val isRightAlignedParagraph =
+          resolvedStyle.textAlign == TextAlign.Right &&
+            preparedTexts.size == 1 &&
+            preparedTexts.head.lines.size > 1
+
+        if isRightAlignedParagraph then
+          val text = preparedTexts.head
+          val rightEdge = rawBaseX + resolvedStyle.resolveWidth().getOrElse(0f)
+          val (x, steps) =
+            rightAlignedText(text.style, text.lines, rightEdge, fontMetrics)
+          emitText(page, x, y, text.style, steps)
+          y - text.depth - resolvedStyle.resolveMarginBottom()
+        else
+          val rowBaseX =
+            resolvedStyle.textAlign match
+              case TextAlign.Left =>
+                rawBaseX
+              case TextAlign.Right =>
+                val rightEdge = rawBaseX + resolvedStyle.resolveWidth().getOrElse(0f)
+                rightEdge - rowFirstLineWidth(preparedTexts)
+
+          var maxDepth = 0f
+          locally:
+            var currentStyle: Option[Style] = None
+            var currentX = 0f
+            var currentLineStartX = 0f
+            var currentLineY = 0f
+            var stepsB = Vector.newBuilder[TextStep]
+
+            def flushGroup(): Unit =
+              currentStyle.foreach { style =>
+                emitText(page, currentX, y, style, stepsB.result())
+              }
+              currentStyle = None
+              stepsB = Vector.newBuilder[TextStep]
+
+            for text <- preparedTexts do
+              val textX = rowBaseX + text.style.resolveMarginLeft()
+              if text.lines.nonEmpty then
+                currentStyle match
+                  case Some(style) if sameTypography(style, text.style) =>
+                    val first = text.lines.head
+                    stepsB += textStep(
+                      first,
+                      dx = textX - currentLineStartX,
+                      dy = -currentLineY
+                    )
+                  case _ =>
+                    flushGroup()
+                    currentStyle = Some(text.style)
+                    currentX = textX
+                    currentLineStartX = textX
+                    currentLineY = 0f
+                    stepsB += textStep(text.lines.head)
+
+                for line <- text.lines.tail do
+                  stepsB += textStep(line, dy = -text.style.lineHeight)
+                end for
+                currentLineStartX = textX
+                currentLineY = -text.depth
+              end if
+              maxDepth = maxDepth.max(text.depth)
+            end for
+            flushGroup()
+
+          y - maxDepth - resolvedStyle.resolveMarginBottom()
+      case FlowBlock.Rule(style) =>
+        val y = resolvedStartY(style, currentY)
+        val x = resolvedBaseX(style, baseX)
+        val width = style.resolveWidth().getOrElse(DefaultRuleWidth)
+        page.line(style.borderWidth, x, y, x + width, y)
+        y - style.resolveMarginBottom()
+      case FlowBlock.Table(style, spec) =>
+        val y = resolvedStartY(style, currentY)
+        val x = resolvedBaseX(style, baseX)
+        val depth = compileTable(page, x, y, style, spec, fontMetrics)
+        y - depth - style.resolveMarginBottom()
+      case FlowBlock.BulletList(style, spec) =>
+        val y = resolvedStartY(style, currentY)
+        val x = resolvedBaseX(style, baseX)
+        val depth = compileBulletList(page, x, y, style, spec, fontMetrics)
+        y - depth - style.resolveMarginBottom()
 
   private def compilePage(
       pageSpec: PageSpec,
       fontMetrics: FontMetrics
   ): LayoutPage =
     val page = new PageBuilder(pageSpec.size)
-
-    for fixed <- pageSpec.fixed do
-      emitText(
+    var nextY = DefaultPageOriginY
+    for block <- pageSpec.blocks do
+      nextY = compileFlowBlock(
         page,
-        anchoredX(fixed, fontMetrics),
-        fixed.y,
-        fixed.style,
-        fixed.steps
+        DefaultPageOriginX,
+        nextY,
+        block,
+        None,
+        fontMetrics
       )
     end for
-
-    for flow <- pageSpec.flows do
-      var currentY = flow.topY
-      for block <- flow.blocks do
-        currentY = compileFlowBlock(page, flow.x, currentY, block, fontMetrics)
-      end for
-    end for
-
     page.result()
 
   def compile(

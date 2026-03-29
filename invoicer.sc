@@ -98,184 +98,184 @@ def showMoney(value: BigDecimal, verbose: Boolean = false): String =
 // lay out the data
 
 object InvoiceMarkup:
+  import FontFamily.*
+  import FontStyle.*
+  import FontWeight.*
   import Html.*
+  import Style.*
+  import TextAlign.*
+  import WhiteSpace.*
 
-  private val titleStyle = TextStyle(FontRef.HelveticaBold, 16, lineHeight = 20)
-  private val headingStyle = TextStyle(FontRef.HelveticaBold, 10)
-  private val bodyStyle = TextStyle(FontRef.Helvetica, 10)
-  private val italicStyle = TextStyle(FontRef.HelveticaOblique, 10)
-  private val monospaceStyle = TextStyle(FontRef.Monospace, 10)
+  private val titleStyle =
+    Style(fontWeight = Bold, fontSize = 16, lineHeight = 20)
+  private val headingStyle = Style(fontWeight = Bold)
+  private val bodyStyle = Style()
+  private val italicStyle = Style(fontStyle = Italic)
+  private val monospaceStyle = Style(fontFamily = Monospace)
 
-  private def invoiceTable: Fragment =
-    table(headingStyle, bodyStyle)(
-      th("Description", width = 315, wrapWidth = Some(315)),
-      th("Quantity", width = 50),
-      th("Unit Price", width = 60),
-      th("Total", width = 75)
-    )(
-      items.map { case Order(description, quantity, unitPrice) =>
-        val total = quantity * unitPrice
-        val qty =
-          if conf.listings.useHours then s"$quantity hrs" else s"$quantity"
-        tr(
-          td(description, wrap = true),
-          td(qty),
-          td(showMoney(unitPrice)),
-          td(showMoney(total))
-        )
-      }*
+  def businessSection: Fragment =
+    p(bodyStyle)(
+      conf.business.name,
+      conf.business.address,
+      conf.business.contact
     )
 
-  private def bankLines: Vector[String] =
-    Vector(
-      s"Beneficiary: ${conf.bank.holder}"
-    ) ++
-      conf.bank.userAddress.toVector.map(userAddress =>
-        s"Beneficiary Address: ${userAddress}"
-      ) ++
-      Vector(
-        s"IBAN: ${conf.bank.account}",
-        s"Recipient SWIFT/BIC: ${conf.bank.swift}"
-      ) ++
-      conf.bank.intermediary.toVector.map(intermediary =>
-        s"Intermediary bank BIC: ${intermediary}"
-      ) ++
-      conf.bank.routing.toVector.map(routing =>
-        s"Routing number: ${routing}"
-      ) ++
-      Vector(
-        s"Message for payee: ${invoiceCode}",
-        s"Bank Name and Address: ${conf.bank.name}",
-        conf.bank.address
-      )
-
-  private def clientBlock: Fragment =
+  def dateSection: Fragment =
     div(
-      row(
-        span(headingStyle)(txt("Bill To:")),
-        span(bodyStyle, x = 40)(txt(conf.client.name))
+      style = Style(
+        width = Some(500.px),
+        textAlign = Right,
+        marginTop = 1.lh,
+        gap = 1.lh,
+        marginBottom = 5.px
+      )
+    )(
+      p(headingStyle)(s"Invoice No: ${invoiceCode}"),
+      p(bodyStyle)(
+        s"Issue Date: ${dateFormatter.format(startDate)}",
+        s"Due Date: ${dateFormatter.format(dueDate)}"
+      )
+    )
+
+  def purchaseSummary: Fragment =
+    div(
+      table(
+        headingStyle,
+        bodyStyle,
+        style = Style(marginBottom = 1.lh, paddingLeft = 5.px)
+      )(
+        th("Description", Style(width = Some(315.px), whiteSpace = Wrap)),
+        th("Quantity", Style(width = Some(50.px))),
+        th("Unit Price", Style(width = Some(60.px))),
+        th("Total", Style(width = Some(75.px)))
+      )(
+        items.map { case Order(description, quantity, unitPrice) =>
+          val total = quantity * unitPrice
+          val qty =
+            if conf.listings.useHours then s"$quantity hrs"
+            else s"$quantity"
+          tr(
+            td(description),
+            td(qty),
+            td(showMoney(unitPrice)),
+            td(showMoney(total))
+          )
+        }*
       ),
-      gap(15),
+      p(headingStyle.copy(marginBottom = 2.lh))(
+        s"Total Amount Due: ${showMoney(subtotal, verbose = true)}"
+      )
+    )
+
+  def clientSummary: Fragment =
+    div(style = Style(marginBottom = 2.lh))(
+      row(style = Style(marginBottom = 1.lh))(
+        span(headingStyle)("Bill To:"),
+        span(bodyStyle.copy(marginLeft = 40.px))(conf.client.name)
+      ),
       p(bodyStyle)(
         (Vector(conf.client.address) ++ conf.client.contactPerson.toVector)*
       )
     )
 
-  private def paymentBlock: Fragment =
+  def paymentDetails: Fragment =
     div(
-      p(headingStyle)("Payable to the following account:"),
-      gap(15),
-      p(monospaceStyle)(bankLines*)
-    )
-
-  private def twintBlock: Fragment =
-    conf.twint match
-      case Some(twint) =>
-        div(
-          gap(30),
-          row(
-            span(headingStyle)(txt("Or pay with TWINT:")),
-            span(monospaceStyle, x = 115)(txt(twint))
-          )
-        )
-      case None =>
-        div()
-
-  private def appendixSummaryItem(appendix: Appendix, idx: Int): Fragment =
-    div(
-      gap(15),
-      row(
-        span(italicStyle)(
-          txt("[x] "),
-          txt(appendixTitles(idx), dx = 15),
-          txt(appendix.description, dy = -italicStyle.lineHeight)
-        )
+      p(headingStyle.copy(marginBottom = 1.lh))(
+        "Payable to the following account:"
+      ),
+      p(monospaceStyle)(
+        Vector(
+          s"Beneficiary: ${conf.bank.holder}"
+        ) ++
+          conf.bank.userAddress.toVector.map(userAddress =>
+            s"Beneficiary Address: ${userAddress}"
+          ) ++
+          Vector(
+            s"IBAN: ${conf.bank.account}",
+            s"Recipient SWIFT/BIC: ${conf.bank.swift}"
+          ) ++
+          conf.bank.intermediary.toVector.map(intermediary =>
+            s"Intermediary bank BIC: ${intermediary}"
+          ) ++
+          conf.bank.routing.toVector.map(routing =>
+            s"Routing number: ${routing}"
+          ) ++
+          Vector(
+            s"Message for payee: ${invoiceCode}",
+            s"Bank Name and Address: ${conf.bank.name}",
+            conf.bank.address
+          )*
+      ),
+      locally(
+        conf.twint.match
+          case Some(twint) =>
+            row(style = Style(marginTop = 2.lh))(
+              span(headingStyle)("Or pay with TWINT:"),
+              span(monospaceStyle.copy(marginLeft = 95.px))(twint)
+            )
+          case None =>
+            div()
       )
     )
 
-  private def appendixSummaryBlock: Fragment =
+  def appendixSummaryBlock: Fragment =
+    def summaryItem(appendix: Appendix, idx: Int): Fragment =
+      row(style = Style(marginTop = 1.lh))(
+        span(italicStyle)("[x]"),
+        span(italicStyle.copy(marginLeft = 15.px))(
+          appendixTitles(idx),
+          appendix.description
+        )
+      )
     if conf.appendices.isEmpty then div()
     else
-      val items =
-        conf.appendices.zipWithIndex.map(appendixSummaryItem).toVector
       div(
-        div(
-          gap(15),
-          hr(),
-          gap(15),
-          p(headingStyle)("Appendices:")
-        ),
-        div(
-          gap(15),
-          div(items*)
+        hr(style = Style(marginTop = 1.lh, marginBottom = 1.lh)),
+        p(headingStyle)("Appendices:"),
+        div(style = Style(marginTop = 1.lh))(
+          conf.appendices.zipWithIndex.map(summaryItem).toVector*
         )
       )
-
-  private def appendixSection(section: AppendixSection): Fragment =
-    div(
-      p(headingStyle)(section.title),
-      gap(15),
-      wrapped(italicStyle, width = 500)(section.desc),
-      gap(15),
-      p(bodyStyle)(section.itemsTitle),
-      gap(15),
-      ul(bodyStyle, width = 450)(
-        section.items.map((id, desc) => li(s"$id: $desc"))*
-      )
-    )
-
-  private def appendixPage(appendix: Appendix, appendixIdx: Int): PageSpec =
-    page()(
-      body(topY = 750)(
-        div(
-          p(titleStyle)(appendixTitles(appendixIdx)),
-          gap(20),
-          p(italicStyle)(appendix.description),
-          gap(30),
-          div(appendix.sections.map(appendixSection)*)
-        )
-      )
-    )
 
   def build: DocumentSpec =
     val firstPage =
-      page(
-        fixed = Vector(
-          fixedLeft(50, 750, titleStyle)("INVOICE"),
-          fixedLeft(50, 730, bodyStyle)(
-            conf.business.name,
-            conf.business.address,
-            conf.business.contact
+      page()(
+        p(titleStyle.copy(marginBottom = 1.lh))("INVOICE"),
+        businessSection,
+        dateSection,
+        purchaseSummary,
+        clientSummary,
+        paymentDetails,
+        appendixSummaryBlock
+      )
+
+    def appendixPage(appendix: Appendix, appendixIdx: Int): PageSpec =
+      def section(section: AppendixSection): Fragment =
+        div(
+          p(headingStyle.copy(marginBottom = 1.lh))(section.title),
+          p(
+            italicStyle.copy(
+              width = Some(500.px),
+              marginBottom = 1.lh,
+              whiteSpace = Wrap
+            )
+          )(
+            section.desc
           ),
-          fixedRight(550, 680, headingStyle, s"Invoice No: ${invoiceCode}"),
-          fixedRight(
-            550,
-            665,
-            bodyStyle,
-            s"Issue Date: ${dateFormatter.format(startDate)}"
-          ),
-          fixedRight(
-            550,
-            650,
-            bodyStyle,
-            s"Due Date: ${dateFormatter.format(dueDate)}"
+          p(bodyStyle.copy(marginBottom = 1.lh))(section.itemsTitle),
+          ul(bodyStyle, style = Style(width = Some(450.px)))(
+            section.items.map((id, desc) => li(s"$id: $desc"))*
           )
         )
-      )(
-        body(topY = 640)(
-          div(
-            invoiceTable,
-            gap(15),
-            p(headingStyle)(
-              s"Total Amount Due: ${showMoney(subtotal, verbose = true)}"
-            ),
-            gap(30),
-            clientBlock,
-            gap(30),
-            paymentBlock,
-            twintBlock,
-            appendixSummaryBlock
-          )
+      page()(
+        p(titleStyle.copy(marginBottom = 1.lh))(
+          appendixTitles(appendixIdx)
+        ),
+        p(italicStyle.copy(marginBottom = 2.lh))(
+          appendix.description
+        ),
+        div(
+          appendix.sections.map(section)*
         )
       )
 
@@ -286,6 +286,8 @@ object InvoiceMarkup:
     )
 
 val invoiceDocument = InvoiceMarkup.build
+Logger.info("Built markup.")
+
 PdfRenderer.render(os.pwd / "Invoice.pdf", useInconsolata, invoiceDocument)
 
 Logger.info("Invoice created successfully.")

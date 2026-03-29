@@ -3,6 +3,7 @@ import org.apache.pdfbox.pdmodel.font.{PDType1Font, PDFont, Standard14Fonts}
 import org.apache.pdfbox.pdmodel.font.PDType0Font
 import Standard14Fonts.FontName
 import org.apache.pdfbox.pdmodel.common.PDRectangle
+import scala.collection.mutable
 
 enum Fonts(name: FontName) extends PDType1Font(name):
   case Helvetica extends Fonts(FontName.HELVETICA)
@@ -25,6 +26,9 @@ object PdfRenderer:
   private final class PdfFontCatalog(document: PDDocument, useInconsolata: Boolean)
       extends ExtendedFonts(document),
         FontMetrics:
+    private val MaxCachedTextLength = 64
+    private val MaxWidthCacheEntries = 4096
+    private val widthCache = mutable.HashMap.empty[(FontRef, Int, String), Float]
 
     private lazy val monospaceFont =
       if useInconsolata then InconsolataRegular else Fonts.Courier
@@ -38,8 +42,17 @@ object PdfRenderer:
         case FontRef.TimesRoman        => Fonts.TimesRoman
         case FontRef.Monospace         => monospaceFont
 
-    def stringWidth(font: FontRef, text: String, fontSize: Int): Float =
+    private def measuredWidth(font: FontRef, text: String, fontSize: Int): Float =
       pdfFont(font).getStringWidth(text) / 1000 * fontSize
+
+    def stringWidth(font: FontRef, text: String, fontSize: Int): Float =
+      if text.length > MaxCachedTextLength then measuredWidth(font, text, fontSize)
+      else
+        if widthCache.size >= MaxWidthCacheEntries then widthCache.clear()
+        widthCache.getOrElseUpdate(
+          (font, fontSize, text),
+          measuredWidth(font, text, fontSize)
+        )
 
   private def rectangle(pageSize: PageSize): PDRectangle =
     pageSize match
@@ -82,9 +95,12 @@ object PdfRenderer:
     val document = new PDDocument()
     try
       val fonts = new PdfFontCatalog(document, useInconsolata)
+      Logger.info("Built font catalog.")
       val layout = LayoutCompiler.compile(documentSpec, fonts)
-      for pageLayout <- layout.pages do
+      Logger.info("Compiled layout.")
+      for (pageLayout, idx) <- layout.pages.zipWithIndex do
         renderPage(document, pageLayout, fonts)
+        Logger.info(s"Rendered page ${idx + 1} of ${layout.pages.size}")
       end for
       document.save(outputPath.toIO)
     finally document.close()

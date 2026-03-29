@@ -5,17 +5,13 @@
 //> using dep "io.github.bishabosha::enhanced-string-interpolator:1.0.2"
 //> using dep io.github.bishabosha::scala-object-notation:0.2.0
 //> using dep ch.epfl.lamp::steps::0.2.0
-//> using file Configs.scala
-//> using file Layout.scala
-//> using file PdfRenderer.scala
+//> using files Configs.scala Layout.scala PdfRenderer.scala Logger.scala
 
-object Logger:
-  def info(msg: String) =
-    Console.err.println(msg.linesWithSeparators.map(l => s"[INFO] $l").mkString)
-  def error(msg: String) =
-    Console.err.println(
-      msg.linesWithSeparators.map(l => s"[Error] $l").mkString
-    )
+import NamedTuple.AnyNamedTuple
+import configs.InvoiceSchema
+import scala.math.BigDecimal.RoundingMode
+import java.time.LocalDate
+import stringmatching.regex.Interpolators.r
 
 def printUsageAndExit(): Nothing =
   Logger.error("args: [--inconsolata] <config-file>")
@@ -30,15 +26,11 @@ val (useInconsolata, configPath) =
     if args.sizeIs != 1 then printUsageAndExit()
     (false, args(0))
 
-/// computed values
-
 Logger.info(s"Begin - config file: ${configPath}")
 val conf = configs.readConfig(os.rel / os.RelPath(configPath))
 Logger.info("parsed config")
 
-import scala.math.BigDecimal.RoundingMode
-import java.time.LocalDate
-import stringmatching.regex.Interpolators.r
+/// computed values
 
 val invoiceCode = "INV" + (10_000 * conf.client.id + conf.invoice.id)
 
@@ -56,18 +48,20 @@ val dateFormatter = java.time.format.DateTimeFormatter.ofPattern("dd MMM yyyy")
 
 case class Order(description: String, quantity: Int, unitPrice: BigDecimal)
 
-type AppendixSection = (
-    title: String,
-    desc: String,
-    itemsTitle: String,
-    items: Vector[(id: String, desc: String)]
-)
+type Search[Key <: String, Keys <: Tuple, Values <: Tuple] =
+  (Keys, Values) match
+    case (Key *: _, v *: _) => v
+    case (_ *: ks, _ *: vs) => Search[Key, ks, vs]
 
-type Appendix = (
-    title: String,
-    description: String,
-    sections: Vector[AppendixSection]
-)
+type SelectField[NT <: AnyNamedTuple, F <: String] = NT match
+  case NamedTuple.NamedTuple[ns, ts] =>
+    Search[F, ns, ts]
+
+type SelectElem[F <: scala.collection.Seq[?]] = F match
+  case scala.collection.Seq[e] => e
+
+type AppendixSection = SelectElem[SelectField[Appendix, "sections"]]
+type Appendix = SelectElem[SelectField[InvoiceSchema, "appendices"]]
 
 var itemsPrice: BigDecimal = 0.0
 val itemsB = List.newBuilder[Order]
@@ -101,6 +95,8 @@ def showMoney(value: BigDecimal, verbose: Boolean = false): String =
     else s"$combined ${conf.currency.symbol} (${conf.currency.code})"
   else combined
 
+// lay out the data
+
 object InvoiceMarkup:
   import Html.*
 
@@ -117,16 +113,16 @@ object InvoiceMarkup:
       th("Unit Price", width = 60),
       th("Total", width = 75)
     )(
-      items.map {
-        case Order(description, quantity, unitPrice) =>
-          val total = quantity * unitPrice
-          val qty = if conf.listings.useHours then s"$quantity hrs" else s"$quantity"
-          tr(
-            td(description, wrap = true),
-            td(qty),
-            td(showMoney(unitPrice)),
-            td(showMoney(total))
-          )
+      items.map { case Order(description, quantity, unitPrice) =>
+        val total = quantity * unitPrice
+        val qty =
+          if conf.listings.useHours then s"$quantity hrs" else s"$quantity"
+        tr(
+          td(description, wrap = true),
+          td(qty),
+          td(showMoney(unitPrice)),
+          td(showMoney(total))
+        )
       }*
     )
 
@@ -284,7 +280,9 @@ object InvoiceMarkup:
       )
 
     document(
-      (Vector(firstPage) ++ conf.appendices.zipWithIndex.map(appendixPage).toVector)*
+      (Vector(firstPage) ++ conf.appendices.zipWithIndex
+        .map(appendixPage)
+        .toVector)*
     )
 
 val invoiceDocument = InvoiceMarkup.build

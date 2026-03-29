@@ -53,7 +53,7 @@ type InvoiceSchema = (
 
 def readConfig(resource: os.RelPath): InvoiceSchema =
   val text = os.read(os.pwd / resource)
-  scalanotation.Parser.parseValueAs[InvoiceSchema](text, name = "conf") match
+  scalanotation.Readers.readDeclAs[InvoiceSchema](text, rootName = "conf") match
     case Result.Ok(value) => value
     case Result.Err(error) =>
       sys.error(

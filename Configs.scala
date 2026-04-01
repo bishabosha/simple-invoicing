@@ -14,7 +14,7 @@ type InvoiceSchema = (
         contactPerson: Option[String]
     ),
     listings: (
-        items: Vector[(desc: String, qty: Int, price: Int)],
+        items: Vector[(desc: String, qty: Double, price: Int)],
         taxRate: Int,
         useHours: Boolean
     ),

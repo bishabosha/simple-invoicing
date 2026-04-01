@@ -6,6 +6,8 @@
 //> using dep io.github.bishabosha::scala-object-notation:0.2.0
 //> using dep ch.epfl.lamp::steps::0.2.0
 //> using files Configs.scala Layout.scala PdfRenderer.scala Logger.scala
+import java.text.DecimalFormatSymbols
+import java.text.DecimalFormat
 
 import NamedTuple.AnyNamedTuple
 import configs.InvoiceSchema
@@ -36,7 +38,7 @@ val invoiceCode = "INV" + (10_000 * conf.client.id + conf.invoice.id)
 
 val optTaxRate: Option[BigDecimal] =
   Option.when(conf.listings.taxRate > 0)(
-    BigDecimal(conf.listings.taxRate) / 100
+    BigDecimal(conf.listings.taxRate.toLong) / 100
   )
 
 val startDate =
@@ -46,7 +48,18 @@ val dueDate = startDate.plusDays(conf.invoice.period.days)
 
 val dateFormatter = java.time.format.DateTimeFormatter.ofPattern("dd MMM yyyy")
 
-case class Order(description: String, quantity: Int, unitPrice: BigDecimal)
+val quantityFormatter = {
+  val symbols = new DecimalFormatSymbols();
+  symbols.setDecimalSeparator(',');
+  val fmt = new DecimalFormat("0.##", symbols)
+  (q: BigDecimal) => fmt.format(q)
+}
+
+case class Order(
+    description: String,
+    quantity: BigDecimal,
+    unitPrice: BigDecimal
+)
 
 type Search[Key <: String, Keys <: Tuple, Values <: Tuple] =
   (Keys, Values) match
@@ -63,21 +76,21 @@ type SelectElem[F <: scala.collection.Seq[?]] = F match
 type AppendixSection = SelectElem[SelectField[Appendix, "sections"]]
 type Appendix = SelectElem[SelectField[InvoiceSchema, "appendices"]]
 
-var itemsPrice: BigDecimal = 0.0
+var itemsTotal = BigDecimal(0)
 val itemsB = List.newBuilder[Order]
 for item <- conf.listings.items do
+  val qtyDec = BigDecimal.decimal(item.qty)
   val unitPrice = BigDecimal(item.price) / 100
-  val total = item.qty * unitPrice
-  itemsPrice += total
-  itemsB += Order(item.desc, item.qty, unitPrice)
+  itemsTotal += qtyDec * unitPrice
+  itemsB += Order(item.desc, qtyDec, unitPrice)
 
 val (subtotal, items) = optTaxRate match
   case Some(rate) =>
-    val tax = itemsPrice * rate
+    val tax = itemsTotal * rate
     val taxShow = f"${rate * 100}%.0f%%"
-    (itemsPrice + tax, itemsB.result() :+ Order(s"VAT ($taxShow)", 1, tax))
+    (itemsTotal + tax, itemsB.result() :+ Order(s"VAT ($taxShow)", 1, tax))
   case None =>
-    (itemsPrice, itemsB.result())
+    (itemsTotal, itemsB.result())
 
 val appendixTitles = ('A' to 'Z')
   .to(LazyList)
@@ -151,9 +164,10 @@ object InvoiceMarkup:
       )(
         items.map { case Order(description, quantity, unitPrice) =>
           val total = quantity * unitPrice
+          val qtyFormat = quantityFormatter(quantity)
           val qty =
-            if conf.listings.useHours then s"$quantity hrs"
-            else s"$quantity"
+            if conf.listings.useHours then s"$qtyFormat hrs"
+            else s"$qtyFormat"
           tr(
             td(description),
             td(qty),

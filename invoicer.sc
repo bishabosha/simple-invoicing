@@ -3,7 +3,7 @@
 //> using toolkit 0.9.1
 //> using dep org.apache.pdfbox:pdfbox:3.0.7
 //> using dep "io.github.bishabosha::enhanced-string-interpolator:1.0.2"
-//> using dep io.github.bishabosha::scala-object-notation:0.2.0
+//> using dep io.github.bishabosha::scala-object-notation:0.2.1
 //> using dep ch.epfl.lamp::steps::0.2.0
 //> using files Configs.scala Layout.scala PdfRenderer.scala Logger.scala
 import java.text.DecimalFormatSymbols

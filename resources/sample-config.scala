@@ -22,6 +22,11 @@ val conf = (
         qty = 15, // raw numbers of the 'desc'
         price =
           75_00 // in the smallest denomination (only decimal currencies supported)
+      ),
+      (
+        desc = "fractional orders are supported",
+        qty = 7.5,
+        price = 15
       )
     ),
     taxRate = 0, // if Value Added Tax equivalent is needed [0-100]

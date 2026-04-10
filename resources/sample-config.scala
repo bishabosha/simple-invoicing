@@ -17,11 +17,9 @@ val conf = (
   listings = (
     items = Vector(
       (
-        desc =
-          "simplified description e.g. SKU, or reference to service in appendix",
+        desc = "simplified description e.g. SKU, or reference to service in appendix",
         qty = 15, // raw numbers of the 'desc'
-        price =
-          75_00 // in the smallest denomination (only decimal currencies supported)
+        price = 75_00 // in the smallest denomination (only decimal currencies supported)
       ),
       (
         desc = "fractional orders are supported",

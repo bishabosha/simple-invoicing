@@ -83,12 +83,10 @@ def tokenizeText(
       case _ =>
         afterBreak = false
         val start = idx
-        while idx < text.length && text.charAt(idx) != ' ' && text.charAt(idx) != '\n' do
-          idx += 1
+        while idx < text.length && text.charAt(idx) != ' ' && text.charAt(idx) != '\n' do idx += 1
         val word = text.substring(start, idx)
         val wordWidth = fontMetrics.stringWidth(font, word, fontSize)
-        if idx >= text.length then
-          tokens += WrapToken.Segment(word + space, wordWidth + spaceWidth)
+        if idx >= text.length then tokens += WrapToken.Segment(word + space, wordWidth + spaceWidth)
         else
           text.charAt(idx) match
             case '\n' =>
@@ -228,19 +226,12 @@ case class Style(
     )
 
 object Style:
-  extension (value: Int)
+  extension [T: Numeric](value: T)
     def px: CssLength =
-      CssLength.Px(value.toFloat)
+      CssLength.Px(Numeric[T].toFloat(value))
 
     def lh: CssLength =
-      CssLength.Lh(value.toFloat)
-
-  extension (value: Float)
-    def px: CssLength =
-      CssLength.Px(value)
-
-    def lh: CssLength =
-      CssLength.Lh(value)
+      CssLength.Lh(Numeric[T].toFloat(value))
 
 case class FlowText(style: Style, lines: Vector[String])
 
@@ -377,13 +368,13 @@ object LayoutCompiler:
       style: Style,
       steps: Vector[TextStep]
   ): Unit =
-    if steps.nonEmpty then
-      page.text(style.fontRef, style.fontSize, x, y)(steps*)
+    if steps.nonEmpty then page.text(style.fontRef, style.fontSize, x, y)(steps*)
 
   private def requireWidth(style: Style, owner: String): Int =
     style.resolveWidth().map(_.toInt).getOrElse(sys.error(s"$owner requires Style.width"))
 
-  private def resolvedStartY(style: Style, currentY: Float): Float = currentY - style.resolveMarginTop()
+  private def resolvedStartY(style: Style, currentY: Float): Float =
+    currentY - style.resolveMarginTop()
 
   private def resolvedBaseX(style: Style, baseX: Float): Float = baseX + style.resolveMarginLeft()
 
@@ -487,9 +478,11 @@ object LayoutCompiler:
     )
 
     val colBoundaries =
-      spec.columns.scanLeft(0f) { (sum, column) =>
-        sum + requireWidth(column.style, "TableColumn")
-      }.toVector
+      spec.columns
+        .scanLeft(0f) { (sum, column) =>
+          sum + requireWidth(column.style, "TableColumn")
+        }
+        .toVector
     val colStarts = colBoundaries.init
     val totalWidth = colBoundaries.lastOption.getOrElse(0f)
     val headerY = topY - rowHeight
@@ -585,8 +578,7 @@ object LayoutCompiler:
       lines.headOption.foreach { firstLine =>
         stepsB += textStep(firstLine, dx = bulletGap)
       }
-      for line <- lines.tail do
-        stepsB += textStep(line, dy = -spec.itemStyle.lineHeight)
+      for line <- lines.tail do stepsB += textStep(line, dy = -spec.itemStyle.lineHeight)
       end for
       emitText(page, baseX, currentY, spec.itemStyle, stepsB.result())
       currentY -= spec.itemStyle.lineHeight * lines.length
@@ -679,8 +671,7 @@ object LayoutCompiler:
                     currentLineY = 0f
                     stepsB += textStep(text.lines.head)
 
-                for line <- text.lines.tail do
-                  stepsB += textStep(line, dy = -text.style.lineHeight)
+                for line <- text.lines.tail do stepsB += textStep(line, dy = -text.style.lineHeight)
                 end for
                 currentLineStartX = textX
                 currentLineY = -text.depth

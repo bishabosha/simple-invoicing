@@ -12,35 +12,28 @@ enum Fonts(name: FontName) extends PDType1Font(name):
   case Courier extends Fonts(FontName.COURIER)
   case TimesRoman extends Fonts(FontName.TIMES_ROMAN)
 
-object FontPaths:
-  val InconsolataRegular =
-    os.pwd / "fonts" / "inconsolata-4" / "Inconsolata-Regular.ttf"
-
-trait ExtendedFonts(doc: PDDocument):
-  lazy val InconsolataRegular = Font(FontPaths.InconsolataRegular)
-  private def Font(path: os.Path) = PDType0Font.load(doc, path.toIO)
-
-end ExtendedFonts
-
 object PdfRenderer:
-  private final class PdfFontCatalog(document: PDDocument, useInconsolata: Boolean)
-      extends ExtendedFonts(document),
-        FontMetrics:
+  private final class PdfFontCatalog(
+      document: PDDocument,
+      monospaceFontPath: Option[os.Path]
+  ) extends FontMetrics:
     private val MaxCachedTextLength = 64
     private val MaxWidthCacheEntries = 4096
     private val widthCache = mutable.HashMap.empty[(FontRef, Int, String), Float]
 
     private lazy val monospaceFont =
-      if useInconsolata then InconsolataRegular else Fonts.Courier
+      monospaceFontPath
+        .map(path => PDType0Font.load(document, path.toIO))
+        .getOrElse(Fonts.Courier)
 
     def pdfFont(font: FontRef): PDFont =
       font match
-        case FontRef.Helvetica         => Fonts.Helvetica
-        case FontRef.HelveticaBold     => Fonts.HelveticaBold
-        case FontRef.HelveticaOblique  => Fonts.HelveticaOblique
-        case FontRef.Courier           => Fonts.Courier
-        case FontRef.TimesRoman        => Fonts.TimesRoman
-        case FontRef.Monospace         => monospaceFont
+        case FontRef.Helvetica        => Fonts.Helvetica
+        case FontRef.HelveticaBold    => Fonts.HelveticaBold
+        case FontRef.HelveticaOblique => Fonts.HelveticaOblique
+        case FontRef.Courier          => Fonts.Courier
+        case FontRef.TimesRoman       => Fonts.TimesRoman
+        case FontRef.Monospace        => monospaceFont
 
     private def measuredWidth(font: FontRef, text: String, fontSize: Int): Float =
       pdfFont(font).getStringWidth(text) / 1000 * fontSize
@@ -75,8 +68,7 @@ object PdfRenderer:
             contentStream.setFont(fonts.pdfFont(font), fontSize)
             contentStream.newLineAtOffset(x, y)
             for step <- steps do
-              if step.dx != 0 || step.dy != 0 then
-                contentStream.newLineAtOffset(step.dx, step.dy)
+              if step.dx != 0 || step.dy != 0 then contentStream.newLineAtOffset(step.dx, step.dy)
               contentStream.showText(step.text)
             end for
             contentStream.endText()
@@ -87,14 +79,30 @@ object PdfRenderer:
             contentStream.stroke()
     finally contentStream.close()
 
+  def tempFileOp(dest: os.Path)(f: os.Path => Unit): Unit =
+    val outputDir = dest / os.up
+    os.makeDir.all(outputDir)
+    val tempDir =
+      os.temp.dir(
+        prefix = s".${dest.baseName}-",
+        dir = outputDir
+      )
+    val tempOutputPath = tempDir / dest.last
+    try
+      f(tempOutputPath)
+      os.move(tempOutputPath, dest, replaceExisting = true, atomicMove = true)
+    finally
+      val _ = os.remove(tempOutputPath)
+      val _ = os.remove(tempDir)
+
   def render(
       outputPath: os.Path,
-      useInconsolata: Boolean,
+      monospaceFontPath: Option[os.Path],
       documentSpec: DocumentSpec
   ): Unit =
     val document = new PDDocument()
     try
-      val fonts = new PdfFontCatalog(document, useInconsolata)
+      val fonts = new PdfFontCatalog(document, monospaceFontPath)
       Logger.info("Built font catalog.")
       val layout = LayoutCompiler.compile(documentSpec, fonts)
       Logger.info("Compiled layout.")
@@ -102,5 +110,5 @@ object PdfRenderer:
         renderPage(document, pageLayout, fonts)
         Logger.info(s"Rendered page ${idx + 1} of ${layout.pages.size}")
       end for
-      document.save(outputPath.toIO)
+      tempFileOp(outputPath)(tempOutputPath => document.save(tempOutputPath.toIO))
     finally document.close()

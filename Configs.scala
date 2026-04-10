@@ -51,11 +51,11 @@ type InvoiceSchema = (
     ]
 )
 
-def readConfig(resource: os.RelPath): InvoiceSchema =
-  val text = os.read(os.pwd / resource)
+def readConfig(path: os.Path): InvoiceSchema =
+  val text = os.read(path)
   scalanotation.Readers.readDeclAs[InvoiceSchema](text, rootName = "conf") match
     case Result.Ok(value) => value
     case Result.Err(error) =>
       sys.error(
-        s"failed to read config from ${resource}:${error.format}"
+        s"failed to read config from ${path.toString}:${error.format}"
       )

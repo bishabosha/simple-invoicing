@@ -5,7 +5,7 @@
 //> using dep "io.github.bishabosha::enhanced-string-interpolator:1.0.2"
 //> using dep io.github.bishabosha::scala-object-notation:0.2.1
 //> using dep ch.epfl.lamp::steps::0.2.1
-//> using files Configs.scala Layout.scala PdfRenderer.scala Logger.scala
+//> using files Configs.scala Layout.scala PdfRenderer.scala Logger.scala IsValid.scala
 //> using options -Wall -Werror
 import java.text.DecimalFormatSymbols
 import java.text.DecimalFormat
@@ -13,9 +13,7 @@ import java.text.DecimalFormat
 import NamedTuple.AnyNamedTuple
 import configs.InvoiceSchema
 import scala.math.BigDecimal.RoundingMode
-import java.time.LocalDate
 import java.time.format.DateTimeFormatter
-import java.time.format.DateTimeParseException
 
 case class CliArgs(
     monospaceFontPath: Option[String] = None,
@@ -34,10 +32,6 @@ def printUsageAndExit(exitCode: Int = 0): Nothing =
       |""".stripMargin
   )
   sys.exit(exitCode)
-
-def fail(msg: String): Nothing =
-  Logger.error(msg)
-  sys.exit(1)
 
 def parseArgs(remaining: List[String], current: CliArgs = CliArgs()): CliArgs =
   remaining match
@@ -66,23 +60,6 @@ def parseArgs(remaining: List[String], current: CliArgs = CliArgs()): CliArgs =
             s"received more than one config file: ${existing}, ${configPath}"
           )
 
-def requireValid(condition: Boolean, message: => String): Unit =
-  if !condition then fail(message)
-
-def parsePath(rawPath: String, label: String): os.Path =
-  try os.Path(rawPath, os.pwd)
-  catch
-    case _: IllegalArgumentException =>
-      fail(s"invalid ${label} path: ${rawPath}")
-
-def parseInvoiceDate(dateText: String): LocalDate =
-  try LocalDate.parse(dateText, DateTimeFormatter.ofPattern("yyyy/M/d"))
-  catch
-    case _: DateTimeParseException =>
-      fail(
-        s"invalid invoice.period.start '${dateText}', expected format yyyy/m/d"
-      )
-
 val cliArgs = parseArgs(args.toList)
 val monospaceFontPath = cliArgs.monospaceFontPath.map(parsePath(_, "monospace font"))
 val configPath = parsePath(cliArgs.configPath.get, "config")
@@ -106,28 +83,12 @@ monospaceFontPath.foreach(fontPath => Logger.info(s"Monospace font file: ${fontP
 val conf = configs.readConfig(configPath)
 Logger.info("parsed config")
 
-requireValid(conf.client.id >= 0, "client.id must be non-negative")
-requireValid(conf.invoice.id >= 0, "invoice.id must be non-negative")
-requireValid(
-  conf.invoice.period.days > 0,
-  "invoice.period.days must be positive"
-)
-requireValid(
-  conf.listings.taxRate >= 0 && conf.listings.taxRate <= 100,
-  "listings.taxRate must be between 0 and 100"
-)
-requireValid(
-  conf.listings.items.nonEmpty,
-  "listings.items must not be empty"
-)
-for (item, idx) <- conf.listings.items.iterator.zipWithIndex do
-  requireValid(item.qty > 0, s"listings.items(${idx}).qty must be positive")
-  requireValid(item.price >= 0, s"listings.items(${idx}).price must be non-negative")
+val validConf = validateConfig(conf)
 
 /// computed values
 
 val invoiceCode = "INV" + (10_000 * conf.client.id + conf.invoice.id)
-val issueDate = parseInvoiceDate(conf.invoice.period.start)
+val issueDate = validConf.issueDate
 val dueDate = issueDate.plusDays(conf.invoice.period.days)
 
 val MoneyScale = 2

@@ -1,10 +1,11 @@
-.scala-build/
-.metals/
-.bsp/
-.zed/
+**/.scala-build/
+**/.metals/
+**/.bsp/
+**/.zed/
 Invoice.pdf
 fonts/
-.DS_Store
+scripts/run-validator
+**/.DS_Store
 conf_*.scala
 .codex/config.toml
 

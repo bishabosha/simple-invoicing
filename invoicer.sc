@@ -4,7 +4,7 @@
 //> using dep org.apache.pdfbox:pdfbox:3.0.7
 //> using dep "io.github.bishabosha::enhanced-string-interpolator:1.0.2"
 //> using dep io.github.bishabosha::scala-object-notation:0.2.1
-//> using dep ch.epfl.lamp::steps::0.2.0
+//> using dep ch.epfl.lamp::steps::0.2.1
 //> using files Configs.scala Layout.scala PdfRenderer.scala Logger.scala
 //> using options -Wall -Werror
 import java.text.DecimalFormatSymbols
@@ -102,9 +102,7 @@ monospaceFontPath.foreach { fontPath =>
 
 Logger.info(s"Begin - config file: ${configPath.toString}")
 Logger.info(s"Output file: ${outputPath.toString}")
-monospaceFontPath.foreach(fontPath =>
-  Logger.info(s"Monospace font file: ${fontPath.toString}")
-)
+monospaceFontPath.foreach(fontPath => Logger.info(s"Monospace font file: ${fontPath.toString}"))
 val conf = configs.readConfig(configPath)
 Logger.info("parsed config")
 

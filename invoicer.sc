@@ -358,7 +358,6 @@ object InvoiceMarkup:
           p(
             italicStyle.copy(
               width = Some(500.px),
-              marginBottom = 1.lh,
               whiteSpace = Wrap
             )
           )(

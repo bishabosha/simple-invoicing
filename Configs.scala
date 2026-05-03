@@ -44,12 +44,22 @@ type InvoiceSchema = (
                 title: String,
                 desc: String,
                 itemsTitle: String,
-                items: Vector[(id: String, desc: String)]
+                items: Vector[LabelledString]
             )
           ]
       )
     ]
 )
+
+case class LabelledString(label: String, value: String)
+object LabelledString:
+  given scalanotation.Reader[LabelledString] =
+    summon[scalanotation.Reader[Map[String, String]]].mapResult(m =>
+      if m.sizeIs == 1 then
+        val (key, value) = m.head
+        Result.Ok(LabelledString(key, value))
+      else Result.Err(scalanotation.DecodeError.Custom(s"expected a single key, found ${m.size}"))
+    )
 
 def readConfig(path: os.Path): InvoiceSchema =
   val text = os.read(path)

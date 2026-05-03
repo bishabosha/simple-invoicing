@@ -3,7 +3,7 @@
 //> using toolkit 0.9.2
 //> using dep org.apache.pdfbox:pdfbox:3.0.7
 //> using dep "io.github.bishabosha::enhanced-string-interpolator:1.0.2"
-//> using dep io.github.bishabosha::scala-object-notation:0.2.1
+//> using dep io.github.bishabosha::scala-object-notation:0.3.2
 //> using dep ch.epfl.lamp::steps::0.2.1
 //> using files Configs.scala Layout.scala PdfRenderer.scala Logger.scala IsValid.scala
 //> using options -Wall -Werror
@@ -11,7 +11,7 @@ import java.text.DecimalFormatSymbols
 import java.text.DecimalFormat
 
 import NamedTuple.AnyNamedTuple
-import configs.InvoiceSchema
+import configs.{InvoiceSchema, LabelledString}
 import scala.math.BigDecimal.RoundingMode
 import java.time.format.DateTimeFormatter
 
@@ -365,7 +365,7 @@ object InvoiceMarkup:
           ),
           p(bodyStyle.copy(marginBottom = 1.lh))(section.itemsTitle),
           ul(bodyStyle, style = Style(width = Some(450.px)))(
-            section.items.map((id, desc) => li(s"$id: $desc"))*
+            section.items.map({ case LabelledString(id, desc) => li(s"$id: $desc") })*
           )
         )
       page()(

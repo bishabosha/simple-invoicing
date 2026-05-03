@@ -2,7 +2,7 @@
 //> using platform native
 //> using nativeVersion 0.5.11
 //> using toolkit 0.9.2
-//> using dep io.github.bishabosha::scala-object-notation::0.3.1
+//> using dep io.github.bishabosha::scala-object-notation::0.3.2
 //> using dep io.github.cquiroz::scala-java-time::2.6.0
 //> using files ${.}/../Configs.scala ${.}/../Logger.scala ${.}/../IsValid.scala
 

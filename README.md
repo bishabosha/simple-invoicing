@@ -26,3 +26,7 @@ the generator now validates common config mistakes up front, such as missing ite
 - [scala](https://www.scala-lang.org/download/) on PATH as `scala`.
 - Java virtual machine
 - optional: a local `.ttf` or similar font file if you want to use `--monospace-font`.
+
+## License
+
+Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE).

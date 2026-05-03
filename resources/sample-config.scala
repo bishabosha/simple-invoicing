@@ -58,8 +58,7 @@ val conf = (
           itemsTitle = "Tasks",
           items = Vector(
             (
-              id = "Work Package X.Y: ...",
-              desc = "This work package focuses on ... \n" +
+              `Work Package X.Y: ...` = "This work package focuses on ... \n" +
                 "text split over multiple lines \n" +
                 "  - indendation is respected\n" +
                 "  - have fun!"
@@ -72,8 +71,7 @@ val conf = (
         //   itemsTitle = "Tasks",
         //   items = Vector(
         //     (
-        //       id = "Work Package A.B: ...",
-        //       desc = "placeholder for recurring descriptions you could comment out."
+        //       `Work Package A.B: ...` = "placeholder for recurring descriptions you could comment out."
         //     )
         //   )
         // )

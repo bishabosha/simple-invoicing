@@ -1,6 +1,6 @@
 // Define the invoice details
-// NOTE: clone and rename as `conf_<title>.scala` to ignore from Git.
-val conf = (
+// NOTE: clone and rename as `conf_<title>.sc` to ignore from Git.
+(
   invoice = (
     id = 1, // ticker per client
     period = (
@@ -56,23 +56,21 @@ val conf = (
           title = "Work Package X: ...",
           desc = "",
           itemsTitle = "Tasks",
-          items = Vector(
-            (
-              `Work Package X.Y: ...` = "This work package focuses on ... \n" +
-                "text split over multiple lines \n" +
-                "  - indendation is respected\n" +
-                "  - have fun!"
-            )
+          items = (
+            `X.1 ...` = "This work package focuses on ... \n" +
+              "text split over multiple lines \n" +
+              "  - indendation is respected\n" +
+              "  - have fun!",
+            `X.2 ...` = "another work package"
           )
         )
         // (
         //   title = "Work Package A: ...",
         //   desc = "",
         //   itemsTitle = "Tasks",
-        //   items = Vector(
-        //     (
-        //       `Work Package A.B: ...` = "placeholder for recurring descriptions you could comment out."
-        //     )
+        //   items = (
+        //     `A.1 ...` =
+        //       "placeholder for recurring descriptions you could comment out."
         //   )
         // )
       )

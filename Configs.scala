@@ -1,6 +1,7 @@
 package configs
 
 import steps.result.Result
+import scala.collection.immutable.SeqMap
 
 type InvoiceSchema = (
     invoice: (
@@ -44,26 +45,16 @@ type InvoiceSchema = (
                 title: String,
                 desc: String,
                 itemsTitle: String,
-                items: Vector[LabelledString]
+                items: SeqMap[String, String]
             )
           ]
       )
     ]
 )
 
-case class LabelledString(label: String, value: String)
-object LabelledString:
-  given scalanotation.Reader[LabelledString] =
-    summon[scalanotation.Reader[Map[String, String]]].mapResult(m =>
-      if m.sizeIs == 1 then
-        val (key, value) = m.head
-        Result.Ok(LabelledString(key, value))
-      else Result.Err(scalanotation.DecodeError.Custom(s"expected a single key, found ${m.size}"))
-    )
-
 def readConfig(path: os.Path): InvoiceSchema =
   val text = os.read(path)
-  scalanotation.Readers.readDeclAs[InvoiceSchema](text, rootName = "conf") match
+  scalanotation.Readers.readAs[InvoiceSchema](text) match
     case Result.Ok(value) => value
     case Result.Err(error) =>
       sys.error(

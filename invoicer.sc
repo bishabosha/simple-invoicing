@@ -11,7 +11,7 @@ import java.text.DecimalFormatSymbols
 import java.text.DecimalFormat
 
 import NamedTuple.AnyNamedTuple
-import configs.{InvoiceSchema, LabelledString}
+import configs.InvoiceSchema
 import scala.math.BigDecimal.RoundingMode
 import java.time.format.DateTimeFormatter
 
@@ -365,7 +365,7 @@ object InvoiceMarkup:
           ),
           p(bodyStyle.copy(marginBottom = 1.lh))(section.itemsTitle),
           ul(bodyStyle, style = Style(width = Some(450.px)))(
-            section.items.map({ case LabelledString(id, desc) => li(s"$id: $desc") })*
+            section.items.toList.map({ (id, desc) => li(s"$id: $desc") })*
           )
         )
       page()(

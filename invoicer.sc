@@ -3,7 +3,7 @@
 //> using toolkit 0.9.2
 //> using dep org.apache.pdfbox:pdfbox:3.0.7
 //> using dep "io.github.bishabosha::enhanced-string-interpolator:1.0.2"
-//> using dep io.github.bishabosha::scala-object-notation:0.3.2
+//> using dep io.github.bishabosha::scala-object-notation:0.4.1
 //> using dep ch.epfl.lamp::steps::0.2.1
 //> using files Configs.scala Layout.scala PdfRenderer.scala Logger.scala IsValid.scala
 //> using options -Wall -Werror
@@ -18,7 +18,8 @@ import java.time.format.DateTimeFormatter
 case class CliArgs(
     monospaceFontPath: Option[String] = None,
     outputPath: String = "Invoice.pdf",
-    configPath: Option[String] = None
+    configPath: Option[String] = None,
+    experimental: Boolean = false
 )
 
 def printUsageAndExit(exitCode: Int = 0): Nothing =
@@ -26,9 +27,10 @@ def printUsageAndExit(exitCode: Int = 0): Nothing =
     """usage: ./invoicer.sc [--monospace-font <file>] [--output <file>] <config-file>
       |
       |options:
-      |  --help              Show this help
-      |  --monospace-font    Use a custom monospace font file for bank/TWINT fields
-      |  --output <file>     Write the PDF to a custom path
+      |  --help                  Show this help
+      |  --monospace-font <file> Use a custom monospace font file for bank/TWINT fields
+      |  --output <file>         Write the PDF to a custom path
+      |  --experimental          Use the experimental config reader
       |""".stripMargin
   )
   sys.exit(exitCode)
@@ -45,6 +47,8 @@ def parseArgs(remaining: List[String], current: CliArgs = CliArgs()): CliArgs =
       parseArgs(tail, current.copy(monospaceFontPath = Some(fontPath)))
     case "--monospace-font" :: Nil =>
       fail("missing value for --monospace-font")
+    case "--experimental" :: rest =>
+      parseArgs(rest, current.copy(experimental = true))
     case "--output" :: output :: tail =>
       parseArgs(tail, current.copy(outputPath = output))
     case "--output" :: Nil =>
@@ -80,7 +84,7 @@ monospaceFontPath.foreach { fontPath =>
 Logger.info(s"Begin - config file: ${configPath.toString}")
 Logger.info(s"Output file: ${outputPath.toString}")
 monospaceFontPath.foreach(fontPath => Logger.info(s"Monospace font file: ${fontPath.toString}"))
-val conf = configs.readConfig(configPath)
+val conf = configs.readConfig(configPath, cliArgs.experimental)
 Logger.info("parsed config")
 
 val validConf = validateConfig(conf)

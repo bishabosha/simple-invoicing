@@ -52,9 +52,17 @@ type InvoiceSchema = (
     ]
 )
 
-def readConfig(path: os.Path): InvoiceSchema =
+def readConfig(path: os.Path, experimental: Boolean = false): InvoiceSchema =
+  readConfigVia(path)(str =>
+    if experimental then scalanotation.Readers.experimental.readAs[InvoiceSchema](str)
+    else scalanotation.Readers.readAs[InvoiceSchema](str)
+  )
+
+private def readConfigVia(path: os.Path)(
+    read: String => Result[InvoiceSchema, scalanotation.DecodeError]
+): InvoiceSchema =
   val text = os.read(path)
-  scalanotation.Readers.readAs[InvoiceSchema](text) match
+  read(text) match
     case Result.Ok(value) => value
     case Result.Err(error) =>
       sys.error(

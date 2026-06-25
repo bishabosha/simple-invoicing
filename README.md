@@ -14,6 +14,11 @@ The `invoicer.sc` script validates the config file, calculates the full total an
 ./invoicer.sc --monospace-font /path/to/your-monospace.ttf resources/sample-config.sc
 ```
 
+> **Try out SIP-72 dedented multiline string literals:**
+> ```bash
+> ./invoicer.sc --experimental --monospace-font /path/to/your-monospace.ttf resources/sample-config-sip-72.sc
+> ```
+
 - either put config `*.sc` files in resources (with `conf_` prefix to be ignored by git),
 - or you can create a symlinked directory `linked-configs` that will be ignored (e.g. for storing config files in a private space)
 

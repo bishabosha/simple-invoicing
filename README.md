@@ -18,6 +18,10 @@ The `invoicer.sc` script validates the config file, calculates the full total an
 > ```bash
 > ./invoicer.sc --experimental resources/sample-config-sip-72.sc
 > ```
+> **Try out collection literal syntax:**
+> ```bash
+> ./invoicer.sc --experimental --literal-maps resources/sample-config-literals.son
+> ```
 
 - either put config `*.sc` files in resources (with `conf_` prefix to be ignored by git),
 - or you can create a symlinked directory `linked-configs` that will be ignored (e.g. for storing config files in a private space)

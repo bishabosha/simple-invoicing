@@ -3,14 +3,15 @@
 //> using platform native
 //> using nativeVersion 0.5.11
 //> using toolkit 0.9.2
-//> using dep io.github.bishabosha::scala-object-notation::0.4.1
-//> using dep io.github.cquiroz::scala-java-time::2.6.0
+//> using dep io.github.bishabosha::scala-object-notation::0.4.3
+//> using dep io.github.cquiroz::scala-java-time::2.7.0
 //> using files ${.}/../Configs.scala ${.}/../Logger.scala ${.}/../IsValid.scala
 
 val configPath =
   args.lift(0).getOrElse(throw new IllegalArgumentException("No config file provided"))
 val experimental = args.lift(1).contains("--experimental")
+val literalMaps = if experimental then args.lift(2).contains("--literal-maps") else false
 
-val conf = configs.readConfig(os.Path(configPath, os.pwd), experimental)
+val conf = configs.readConfig(os.Path(configPath, os.pwd), experimental, literalMaps)
 val _ = validateConfig(conf)
 Logger.info(s"Config loaded successfully from $configPath")

@@ -3,7 +3,7 @@
 //> using toolkit 0.9.2
 //> using dep org.apache.pdfbox:pdfbox:3.0.7
 //> using dep "io.github.bishabosha::enhanced-string-interpolator:1.0.2"
-//> using dep io.github.bishabosha::scala-object-notation:0.4.1
+//> using dep io.github.bishabosha::scala-object-notation:0.4.3
 //> using dep ch.epfl.lamp::steps::0.2.1
 //> using files Configs.scala Layout.scala PdfRenderer.scala Logger.scala IsValid.scala
 //> using options -Wall -Werror
@@ -19,7 +19,8 @@ case class CliArgs(
     monospaceFontPath: Option[String] = None,
     outputPath: String = "Invoice.pdf",
     configPath: Option[String] = None,
-    experimental: Boolean = false
+    experimental: Boolean = false,
+    literalMaps: Boolean = false
 )
 
 def printUsageAndExit(exitCode: Int = 0): Nothing =
@@ -31,6 +32,7 @@ def printUsageAndExit(exitCode: Int = 0): Nothing =
       |  --monospace-font <file> Use a custom monospace font file for bank/TWINT fields
       |  --output <file>         Write the PDF to a custom path
       |  --experimental          Use the experimental config reader
+      |  --literal-maps          Use literal maps for config parsing (requires --experimental)
       |""".stripMargin
   )
   sys.exit(exitCode)
@@ -49,6 +51,9 @@ def parseArgs(remaining: List[String], current: CliArgs = CliArgs()): CliArgs =
       fail("missing value for --monospace-font")
     case "--experimental" :: rest =>
       parseArgs(rest, current.copy(experimental = true))
+    case "--literal-maps" :: rest =>
+      if (!current.experimental) fail("literal-maps requires --experimental")
+      parseArgs(rest, current.copy(literalMaps = true))
     case "--output" :: output :: tail =>
       parseArgs(tail, current.copy(outputPath = output))
     case "--output" :: Nil =>
@@ -84,7 +89,7 @@ monospaceFontPath.foreach { fontPath =>
 Logger.info(s"Begin - config file: ${configPath.toString}")
 Logger.info(s"Output file: ${outputPath.toString}")
 monospaceFontPath.foreach(fontPath => Logger.info(s"Monospace font file: ${fontPath.toString}"))
-val conf = configs.readConfig(configPath, cliArgs.experimental)
+val conf = configs.readConfig(configPath, cliArgs.experimental, cliArgs.literalMaps)
 Logger.info("parsed config")
 
 val validConf = validateConfig(conf)
@@ -191,7 +196,7 @@ object InvoiceMarkup:
   private val titleStyle =
     Style(fontWeight = Bold, fontSize = 16, lineHeight = 20)
   private val headingStyle = Style(fontWeight = Bold)
-  private val bodyStyle = Style()
+  private val bodyStyle = Style(width = Some(500.px))
   private val italicStyle = Style(fontStyle = Italic)
   private val monospaceStyle = Style(fontFamily = Monospace)
   private val summaryRowStyle =
@@ -200,11 +205,7 @@ object InvoiceMarkup:
   private val summaryValueStyle = bodyStyle.copy(marginLeft = 415.px)
 
   def businessSection: Fragment =
-    p(bodyStyle)(
-      conf.business.name,
-      conf.business.address,
-      conf.business.contact
-    )
+    p(bodyStyle)(conf.business)
 
   def dateSection: Fragment =
     div(
@@ -292,35 +293,9 @@ object InvoiceMarkup:
         "Payable to the following account:"
       ),
       p(monospaceStyle)(
-        Vector(
-          s"Beneficiary: ${conf.bank.holder}"
-        ) ++
-          conf.bank.userAddress.toVector.map(userAddress =>
-            s"Beneficiary Address: ${userAddress}"
-          ) ++
-          Vector(
-            s"IBAN: ${conf.bank.account}",
-            s"Recipient SWIFT/BIC: ${conf.bank.swift}"
-          ) ++
-          conf.bank.intermediary.toVector.map(intermediary =>
-            s"Intermediary bank BIC: ${intermediary}"
-          ) ++
-          conf.bank.routing.toVector.map(routing => s"Routing number: ${routing}") ++
-          Vector(
-            s"Message for payee: ${invoiceCode}",
-            s"Bank Name and Address: ${conf.bank.name}",
-            conf.bank.address
-          )*
-      ),
-      locally(
-        conf.twint.match
-          case Some(twint) =>
-            row(style = Style(marginTop = 2.lh))(
-              span(headingStyle)("Or pay with TWINT:"),
-              span(monospaceStyle.copy(marginLeft = 95.px))(twint)
-            )
-          case None =>
-            div()
+        conf.bank.toSeq.map { case (key, value) =>
+          s"${key}: ${value.replaceAllLiterally("$INVOICE_NO", invoiceCode)}"
+        }*
       )
     )
 

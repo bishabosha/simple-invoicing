@@ -1,0 +1,80 @@
+import language.experimental.{dedentedStringLiterals, collectionLiterals}
+(
+  invoice = (
+    id = 1,
+    period = (
+      start = "2026/7/1",
+      days = 30
+    )
+  ),
+  client = (
+    id = 3,
+    name = "ACME corp.",
+    address = '''
+      Example street,
+      London, W2,
+      United Kingdom
+      ''',
+    contactPerson = "John Snow"
+  ),
+  listings = (
+    items = [
+      (
+        desc = "simplified description e.g. SKU, or reference to service in appendix",
+        qty = 15,
+        price = 75_00
+      ),
+      (
+        desc = "fractional orders are supported",
+        qty = 7.5,
+        price = 15
+      )
+    ],
+    taxRate = 0,
+    useHours = true
+  ),
+  business = '''
+    Lisa Simpson,
+    60 Old Kent Road,
+    London, SE1,
+    United Kingdom,
+    example@example.com
+    ''',
+  currency = (code = "EUR", symbol = "€", left = true),
+  bank = [
+    "Beneficiary"           -> "President Business",
+    "IBAN"                  -> "CHXX 0000 0000 0000 0000 X",
+    "Recipient SWIFT/BIC"   -> "UBSXXXXX99X",
+    "Message for payee"     -> "$INVOICE_NO",
+    "Bank Name and Address" -> '''
+      UBS Switzerland AG,
+      25 Rue de Geneve,
+      1003 Lausanne,
+      Switzerland
+      ''',
+  ],
+  appendices = [
+    (
+      title = "Work Packages",
+      description = "Descriptions from the associated agreement with <Client>",
+      sections = [
+        (
+          title = "Work Package X: ...",
+          desc = "",
+          itemsTitle = "Tasks",
+          items = [
+            "X.a ..." -> '''
+              This work package focuses on ...
+              text split over multiple lines
+                - indendation is respected
+                - have fun!
+              ''',
+            "X.b ..." -> '''
+              another work package
+              '''
+          ]
+        )
+      ]
+    )
+  ]
+)

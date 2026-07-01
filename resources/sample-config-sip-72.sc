@@ -1,7 +1,7 @@
 //> using scala 3.nightly
 //> using options -experimental
 // Define the invoice details
-import language.experimental.dedentedStringLiterals
+import language.experimental.{dedentedStringLiterals}
 (
   invoice = (
     id = 1, // ticker per client
@@ -44,39 +44,26 @@ import language.experimental.dedentedStringLiterals
     taxRate = 0, // if Value Added Tax equivalent is needed [0-100]
     useHours = true // changes label of quantity to hours
   ),
-  business = (
-    name = '''
-      Lisa Simpson
-      ''',
-    address = '''
-      60 Old Kent Road, London, SE1, United Kingdom
-      ''',
-    contact = '''
-      example@example.com
-      '''
-  ),
+  business = '''
+    Lisa Simpson,
+    60 Old Kent Road,
+    London, SE1,
+    United Kingdom,
+    example@example.com
+    ''',
   currency = (code = "EUR", symbol = "€", left = true),
   bank = (
-    holder = '''
-      President Business
-      ''',
-    name = '''
-      UBS Switzerland AG
-      ''',
-    address = '''
-      The bank's address
-      ''',
-    userAddress = null, // or "51 Main St, USA",
-    account = '''
-      CHXX 0000 0000 0000 0000 X
-      ''', // IBAN
-    swift = '''
-      UBSXXXXX99X
-      ''',
-    intermediary = null, // or a swift code
-    routing = null // or "000000000"
+    `Beneficiary` = "President Business",
+    `IBAN` = "CHXX 0000 0000 0000 0000 X",
+    `Recipient SWIFT/BIC` = "UBSXXXXX99X",
+    `Message for payee` = "$INVOICE_NO",
+    `Bank Name and Address` = '''
+      UBS Switzerland AG,
+      25 Rue de Geneve,
+      1003 Lausanne,
+      Switzerland
+      '''
   ),
-  twint = null, // Swiss personal payment service
   appendices = Vector(
     (
       title = '''
@@ -95,13 +82,13 @@ import language.experimental.dedentedStringLiterals
             Tasks
             ''',
           items = (
-            `X.1 ...` = '''
+            `X.a ...` = '''
               This work package focuses on ...
               text split over multiple lines
                 - indendation is respected
                 - have fun!
               ''',
-            `X.2 ...` = '''
+            `X.b ...` = '''
               another work package
               '''
           )

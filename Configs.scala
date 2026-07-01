@@ -19,23 +19,9 @@ type InvoiceSchema = (
         taxRate: Int,
         useHours: Boolean
     ),
-    business: (
-        name: String,
-        address: String,
-        contact: String
-    ),
+    business: String,
     currency: (code: String, symbol: String, left: Boolean),
-    bank: (
-        holder: String,
-        name: String,
-        address: String,
-        userAddress: Option[String],
-        account: String,
-        swift: String,
-        intermediary: Option[String],
-        routing: Option[String]
-    ),
-    twint: Option[String],
+    bank: SeqMap[String, String],
     appendices: Vector[
       (
           title: String,
@@ -52,7 +38,18 @@ type InvoiceSchema = (
     ]
 )
 
-def readConfig(path: os.Path, experimental: Boolean = false): InvoiceSchema =
+def defaultReader[V: scalanotation.Reader]: scalanotation.Reader[SeqMap[String, V]] =
+  summon[scalanotation.Reader[SeqMap[String, V]]]
+
+def readConfig(
+    path: os.Path,
+    experimental: Boolean = false,
+    literalMaps: Boolean = false
+): InvoiceSchema =
+  given [V: scalanotation.Reader] => scalanotation.Reader[SeqMap[String, V]] =
+    if literalMaps then scalanotation.Reader.pairSeqAsDict
+    else defaultReader
+
   readConfigVia(path)(str =>
     if experimental then scalanotation.Readers.experimental.readAs[InvoiceSchema](str)
     else scalanotation.Readers.readAs[InvoiceSchema](str)

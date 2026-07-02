@@ -9,14 +9,14 @@ The `invoicer.sc` script validates the config file, calculates the full total an
 ## Usage
 
 ```bash
-./invoicer.sh resources/sample-config.sc
-./invoicer.sh --output invoices/acme-2026-01.pdf resources/sample-config.sc
-./invoicer.sh --monospace-font /path/to/your-monospace.ttf resources/sample-config.sc
+./invoicer.sh resources/sampleConfig.scala
+./invoicer.sh --output invoices/acme-2026-01.pdf resources/sampleConfig.scala
+./invoicer.sh --monospace-font /path/to/your-monospace.ttf resources/sampleConfig.scala
 ```
 
 > **Try out SIP-72 dedented multiline string literals:**
 > ```bash
-> ./invoicer.sh --experimental resources/sample-config-sip-72.sc
+> ./invoicer.sh --experimental resources/sampleConfigSip72.scala
 > ```
 > **Try out collection literal syntax:**
 > ```bash

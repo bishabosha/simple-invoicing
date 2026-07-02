@@ -1,5 +1,5 @@
 import language.experimental.{dedentedStringLiterals, collectionLiterals}
-(
+val Invoice = (
   invoice = (
     id = 1,
     period = (

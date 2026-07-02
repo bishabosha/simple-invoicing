@@ -1,6 +1,6 @@
 // Define the invoice details
 // NOTE: clone and rename as `conf_<title>.sc` to ignore from Git.
-(
+val Invoice = (
   invoice = (
     id = 1, // ticker per client
     period = (

@@ -705,7 +705,7 @@ object LayoutCompiler:
     val page = new PageBuilder(pageSpec.size)
     var nextY = DefaultPageOriginY
     for block <- pageSpec.blocks do
-      nextY = compileFlowBlock(
+      val res = compileFlowBlock(
         page,
         DefaultPageOriginX,
         nextY,
@@ -713,6 +713,7 @@ object LayoutCompiler:
         None,
         fontMetrics
       )
+      nextY = res
     end for
     page.result()
 

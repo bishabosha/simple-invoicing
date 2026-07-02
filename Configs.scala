@@ -1,5 +1,6 @@
 package configs
 
+import scala.NamedTuple.AnyNamedTuple
 import steps.result.Result
 import scala.collection.immutable.SeqMap
 
@@ -38,6 +39,18 @@ type InvoiceSchema = (
     ]
 )
 
+type Search[Key <: String, Keys <: Tuple, Values <: Tuple] =
+  (Keys, Values) match
+    case (Key *: _, v *: _) => v
+    case (_ *: ks, _ *: vs) => Search[Key, ks, vs]
+
+type SelectField[NT <: AnyNamedTuple, F <: String] = NT match
+  case NamedTuple.NamedTuple[ns, ts] =>
+    Search[F, ns, ts]
+
+type SelectElem[F <: scala.collection.Seq[?]] = F match
+  case scala.collection.Seq[e] => e
+
 def defaultReader[V: scalanotation.Reader]: scalanotation.Reader[SeqMap[String, V]] =
   summon[scalanotation.Reader[SeqMap[String, V]]]
 
@@ -51,8 +64,9 @@ def readConfig(
     else defaultReader
 
   readConfigVia(path)(str =>
-    if experimental then scalanotation.Readers.experimental.readAs[InvoiceSchema](str)
-    else scalanotation.Readers.readAs[InvoiceSchema](str)
+    if experimental then
+      scalanotation.Readers.experimental.readDeclAs[InvoiceSchema](str, rootName = "Invoice")
+    else scalanotation.Readers.readDeclAs[InvoiceSchema](str, rootName = "Invoice")
   )
 
 private def readConfigVia(path: os.Path)(

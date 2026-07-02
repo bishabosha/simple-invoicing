@@ -1,16 +1,7 @@
-#! /usr/bin/env scala shebang
-//> using scala 3.8.1
-//> using toolkit 0.9.2
-//> using dep org.apache.pdfbox:pdfbox:3.0.7
-//> using dep "io.github.bishabosha::enhanced-string-interpolator:1.0.2"
-//> using dep io.github.bishabosha::scala-object-notation:0.4.3
-//> using dep ch.epfl.lamp::steps::0.2.1
-//> using files Configs.scala Layout.scala PdfRenderer.scala Logger.scala IsValid.scala
-//> using options -Wall -Werror
 import java.text.DecimalFormatSymbols
 import java.text.DecimalFormat
 
-import NamedTuple.AnyNamedTuple
+import java.time.LocalDate
 import configs.InvoiceSchema
 import scala.math.BigDecimal.RoundingMode
 import java.time.format.DateTimeFormatter
@@ -69,122 +60,7 @@ def parseArgs(remaining: List[String], current: CliArgs = CliArgs()): CliArgs =
             s"received more than one config file: ${existing}, ${configPath}"
           )
 
-val cliArgs = parseArgs(args.toList)
-val monospaceFontPath = cliArgs.monospaceFontPath.map(parsePath(_, "monospace font"))
-val configPath = parsePath(cliArgs.configPath.get, "config")
-val outputPath = parsePath(cliArgs.outputPath, "output")
-
-requireValid(os.isFile(configPath), s"config file not found: ${configPath.toString}")
-requireValid(
-  !os.isDir(outputPath),
-  s"output path points to a directory: ${outputPath.toString}"
-)
-monospaceFontPath.foreach { fontPath =>
-  requireValid(
-    os.isFile(fontPath),
-    s"monospace font file not found: ${fontPath.toString}"
-  )
-}
-
-Logger.info(s"Begin - config file: ${configPath.toString}")
-Logger.info(s"Output file: ${outputPath.toString}")
-monospaceFontPath.foreach(fontPath => Logger.info(s"Monospace font file: ${fontPath.toString}"))
-val conf = configs.readConfig(configPath, cliArgs.experimental, cliArgs.literalMaps)
-Logger.info("parsed config")
-
-val validConf = validateConfig(conf)
-
-/// computed values
-
-val invoiceCode = "INV" + (10_000 * conf.client.id + conf.invoice.id)
-val issueDate = validConf.issueDate
-val dueDate = issueDate.plusDays(conf.invoice.period.days)
-
-val MoneyScale = 2
-
-def roundMoney(value: BigDecimal): BigDecimal =
-  value.setScale(MoneyScale, RoundingMode.HALF_UP)
-
-val optTaxRate: Option[BigDecimal] =
-  Option.when(conf.listings.taxRate > 0)(
-    BigDecimal(conf.listings.taxRate.toLong) / 100
-  )
-
-val dateFormatter = DateTimeFormatter.ofPattern("dd MMM yyyy")
-
-val quantityFormatter = {
-  val symbols = new DecimalFormatSymbols();
-  symbols.setDecimalSeparator(',');
-  val fmt = new DecimalFormat("0.##", symbols)
-  (q: BigDecimal) => fmt.format(q)
-}
-
-val moneyFormatter = {
-  val symbols = new DecimalFormatSymbols();
-  symbols.setDecimalSeparator(',')
-  val fmt = new DecimalFormat("0.00", symbols)
-  fmt.setRoundingMode(java.math.RoundingMode.HALF_UP)
-  (amount: BigDecimal) => fmt.format(roundMoney(amount).bigDecimal)
-}
-
-case class InvoiceItem(
-    description: String,
-    quantity: BigDecimal,
-    unitPrice: BigDecimal,
-    total: BigDecimal
-)
-
-type Search[Key <: String, Keys <: Tuple, Values <: Tuple] =
-  (Keys, Values) match
-    case (Key *: _, v *: _) => v
-    case (_ *: ks, _ *: vs) => Search[Key, ks, vs]
-
-type SelectField[NT <: AnyNamedTuple, F <: String] = NT match
-  case NamedTuple.NamedTuple[ns, ts] =>
-    Search[F, ns, ts]
-
-type SelectElem[F <: scala.collection.Seq[?]] = F match
-  case scala.collection.Seq[e] => e
-
-type AppendixSection = SelectElem[SelectField[Appendix, "sections"]]
-type Appendix = SelectElem[SelectField[InvoiceSchema, "appendices"]]
-
-val items = conf.listings.items.map { item =>
-  val qtyDec = BigDecimal.decimal(item.qty)
-  val unitPrice = BigDecimal(item.price) / 100
-  val lineTotal = roundMoney(qtyDec * unitPrice)
-  InvoiceItem(item.desc, qtyDec, unitPrice, lineTotal)
-}
-
-val itemsSubtotal =
-  items.iterator.map(_.total).foldLeft(BigDecimal(0))(_ + _)
-
-val taxAmount = optTaxRate.map(rate => roundMoney(itemsSubtotal * rate))
-val grandTotal = itemsSubtotal + taxAmount.getOrElse(BigDecimal(0))
-val quantityColumnTitle =
-  if conf.listings.useHours then "Hours" else "Quantity"
-val taxLabel = s"VAT (${conf.listings.taxRate}%)"
-
-val titleStream =
-  for
-    n <- LazyList.iterate(0)(_ + 1)
-    a <- ('A' to 'Z').to(LazyList)
-  yield if n == 0 then a else s"$a$n"
-
-val appendixTitles = titleStream
-  .lazyZip(conf.appendices)
-  .map((letter, appendix) => s"Appendix $letter ($"${appendix.title}$")")
-
-def showMoney(value: BigDecimal, verbose: Boolean = false): String =
-  val combined = moneyFormatter(value)
-  if verbose then
-    if conf.currency.left then s"${conf.currency.symbol} $combined (${conf.currency.code})"
-    else s"$combined ${conf.currency.symbol} (${conf.currency.code})"
-  else combined
-
-// lay out the data
-
-object InvoiceMarkup:
+class InvoiceMarkup(conf: InvoiceSchema, issueDate: LocalDate):
   import FontFamily.*
   import FontStyle.*
   import FontWeight.*
@@ -192,6 +68,8 @@ object InvoiceMarkup:
   import Style.*
   import TextAlign.*
   import WhiteSpace.*
+  import configs.SelectField
+  import configs.SelectElem
 
   private val titleStyle =
     Style(fontWeight = Bold, fontSize = 16, lineHeight = 20)
@@ -203,6 +81,78 @@ object InvoiceMarkup:
     Style(width = Some(500.px), marginTop = 1.lh)
   private val summaryLabelStyle = headingStyle.copy(marginLeft = 320.px)
   private val summaryValueStyle = bodyStyle.copy(marginLeft = 415.px)
+
+  type AppendixSection = SelectElem[SelectField[Appendix, "sections"]]
+  type Appendix = SelectElem[SelectField[InvoiceSchema, "appendices"]]
+
+  def roundMoney(value: BigDecimal): BigDecimal =
+    val MoneyScale = 2
+    value.setScale(MoneyScale, RoundingMode.HALF_UP)
+
+  val optTaxRate: Option[BigDecimal] =
+    Option.when(conf.listings.taxRate > 0)(
+      BigDecimal(conf.listings.taxRate.toLong) / 100
+    )
+
+  val dateFormatter = DateTimeFormatter.ofPattern("dd MMM yyyy")
+
+  val quantityFormatter = {
+    val symbols = new DecimalFormatSymbols();
+    symbols.setDecimalSeparator(',');
+    val fmt = new DecimalFormat("0.##", symbols)
+    (q: BigDecimal) => fmt.format(q)
+  }
+
+  val moneyFormatter = {
+    val symbols = new DecimalFormatSymbols();
+    symbols.setDecimalSeparator(',')
+    val fmt = new DecimalFormat("0.00", symbols)
+    fmt.setRoundingMode(java.math.RoundingMode.HALF_UP)
+    (amount: BigDecimal) => fmt.format(roundMoney(amount).bigDecimal)
+  }
+
+  val invoiceCode = "INV" + (10_000 * conf.client.id + conf.invoice.id)
+  val dueDate = issueDate.plusDays(conf.invoice.period.days)
+
+  case class InvoiceItem(
+      description: String,
+      quantity: BigDecimal,
+      unitPrice: BigDecimal,
+      total: BigDecimal
+  )
+
+  val items = conf.listings.items.map { item =>
+    val qtyDec = BigDecimal.decimal(item.qty)
+    val unitPrice = BigDecimal(item.price) / 100
+    val lineTotal = roundMoney(qtyDec * unitPrice)
+    InvoiceItem(item.desc, qtyDec, unitPrice, lineTotal)
+  }
+
+  val itemsSubtotal =
+    items.iterator.map(_.total).foldLeft(BigDecimal(0))(_ + _)
+
+  val taxAmount = optTaxRate.map(rate => roundMoney(itemsSubtotal * rate))
+  val grandTotal = itemsSubtotal + taxAmount.getOrElse(BigDecimal(0))
+  val quantityColumnTitle =
+    if conf.listings.useHours then "Hours" else "Quantity"
+  val taxLabel = s"VAT (${conf.listings.taxRate}%)"
+
+  val titleStream =
+    for
+      n <- LazyList.iterate(0)(_ + 1).map(_.toString)
+      a <- ('A' to 'Z').to(LazyList).map(_.toString)
+    yield if n == "0" then a else s"$a$n"
+
+  val appendixTitles = titleStream
+    .lazyZip(conf.appendices)
+    .map((letter, appendix) => s"Appendix $letter ($"${appendix.title}$")")
+
+  def showMoney(value: BigDecimal, verbose: Boolean = false): String =
+    val combined = moneyFormatter(value)
+    if verbose then
+      if conf.currency.left then s"${conf.currency.symbol} $combined (${conf.currency.code})"
+      else s"$combined ${conf.currency.symbol} (${conf.currency.code})"
+    else combined
 
   def businessSection: Fragment =
     p(bodyStyle)(conf.business)
@@ -365,9 +315,35 @@ object InvoiceMarkup:
         .toVector)*
     )
 
-val invoiceDocument = InvoiceMarkup.build
-Logger.info("Built markup.")
+@main def invoicer(args: String*): Unit =
+  val cliArgs = parseArgs(args.toList)
+  val monospaceFontPath = cliArgs.monospaceFontPath.map(parsePath(_, "monospace font"))
+  val configPath = parsePath(cliArgs.configPath.get, "config")
+  val outputPath = parsePath(cliArgs.outputPath, "output")
 
-PdfRenderer.render(outputPath, monospaceFontPath, invoiceDocument)
+  requireValid(os.isFile(configPath), s"config file not found: ${configPath.toString}")
+  requireValid(
+    !os.isDir(outputPath),
+    s"output path points to a directory: ${outputPath.toString}"
+  )
+  monospaceFontPath.foreach { fontPath =>
+    requireValid(
+      os.isFile(fontPath),
+      s"monospace font file not found: ${fontPath.toString}"
+    )
+  }
 
-Logger.info("Invoice created successfully.")
+  Logger.info(s"Begin - config file: ${configPath.toString}")
+  Logger.info(s"Output file: ${outputPath.toString}")
+  monospaceFontPath.foreach(fontPath => Logger.info(s"Monospace font file: ${fontPath.toString}"))
+  val conf = configs.readConfig(configPath, cliArgs.experimental, cliArgs.literalMaps)
+  Logger.info("parsed config")
+
+  val validConf = validateConfig(conf)
+
+  val invoiceDocument = InvoiceMarkup(conf, validConf.issueDate).build
+  Logger.info("Built markup.")
+
+  PdfRenderer.render(outputPath, monospaceFontPath, invoiceDocument)
+
+  Logger.info("Invoice created successfully.")

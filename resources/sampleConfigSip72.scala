@@ -2,7 +2,7 @@
 //> using options -experimental
 // Define the invoice details
 import language.experimental.{dedentedStringLiterals}
-(
+val Invoice = (
   invoice = (
     id = 1, // ticker per client
     period = (

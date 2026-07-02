@@ -9,18 +9,18 @@ The `invoicer.sc` script validates the config file, calculates the full total an
 ## Usage
 
 ```bash
-./invoicer.sc resources/sample-config.sc
-./invoicer.sc --output invoices/acme-2026-01.pdf resources/sample-config.sc
-./invoicer.sc --monospace-font /path/to/your-monospace.ttf resources/sample-config.sc
+./invoicer.sh resources/sample-config.sc
+./invoicer.sh --output invoices/acme-2026-01.pdf resources/sample-config.sc
+./invoicer.sh --monospace-font /path/to/your-monospace.ttf resources/sample-config.sc
 ```
 
 > **Try out SIP-72 dedented multiline string literals:**
 > ```bash
-> ./invoicer.sc --experimental resources/sample-config-sip-72.sc
+> ./invoicer.sh --experimental resources/sample-config-sip-72.sc
 > ```
 > **Try out collection literal syntax:**
 > ```bash
-> ./invoicer.sc --experimental --literal-maps resources/sample-config-literals.son
+> ./invoicer.sh --experimental --literal-maps resources/sample-config-literals.son
 > ```
 
 - either put config `*.sc` files in resources (with `conf_` prefix to be ignored by git),

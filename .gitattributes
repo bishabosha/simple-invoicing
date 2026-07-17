@@ -1,4 +1,4 @@
-**/*.scon linguist-language=scala
+**/*.scon linguist-language=Scala
 
 **/*.scon linguist-vendored=false
 **/*.scon linguist-generated=false

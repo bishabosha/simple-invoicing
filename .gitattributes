@@ -1,0 +1,6 @@
+**/*.scon linguist-language=Scala
+
+**/*.scon linguist-vendored=false
+**/*.scon linguist-generated=false
+**/*.scon linguist-documentation=false
+**/*.scon linguist-detectable=true

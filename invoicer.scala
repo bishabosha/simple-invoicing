@@ -6,61 +6,63 @@ import configs.InvoiceSchema
 import scala.math.BigDecimal.RoundingMode
 import java.time.format.DateTimeFormatter
 
-case class CliArgs(
-    monospaceFontPath: Option[String] = None,
-    outputPath: String = "Invoice.pdf",
-    configPath: Option[String] = None,
+import flagged.*
+
+@run
+@version("1.0.0")
+@name("./invoicer.sh")
+@help("generate an invoice from a config file")
+def invoicer(
+    @help("Use a custom monospace font file for bank details fields")
+    monospaceFont: Option[String] = None,
+    @help("Write the PDF to a custom path")
+    output: String = "Invoice.pdf",
+    @help("the config file to read from") @positional
+    configPath: String,
+    @help("Use the experimental config reader")
     experimental: Boolean = false,
+    @help("Use literal maps for config parsing")
     literalMaps: Boolean = false
-)
+): Unit = {
+  if (literalMaps && !experimental) {
+    Logger.error("--literal-maps are not supported without --experimental")
+    return
+  }
+  val monospaceFontPath = monospaceFont.map(parsePath(_, "monospace font"))
+  val configPath0 = parsePath(configPath, "config")
+  val outputPath = parsePath(output, "output")
 
-def printUsageAndExit(exitCode: Int = 0): Nothing =
-  Console.err.println(
-    """usage: ./invoicer.sc [--monospace-font <file>] [--output <file>] <config-file>
-      |
-      |options:
-      |  --help                  Show this help
-      |  --monospace-font <file> Use a custom monospace font file for bank/TWINT fields
-      |  --output <file>         Write the PDF to a custom path
-      |  --experimental          Use the experimental config reader
-      |  --literal-maps          Use literal maps for config parsing (requires --experimental)
-      |""".stripMargin
+  requireValid(os.isFile(configPath0), s"config file not found: ${configPath0.toString}")
+  requireValid(
+    !os.isDir(outputPath),
+    s"output path points to a directory: ${outputPath.toString}"
   )
-  sys.exit(exitCode)
+  monospaceFontPath.foreach { fontPath =>
+    requireValid(
+      os.isFile(fontPath),
+      s"monospace font file not found: ${fontPath.toString}"
+    )
+  }
 
-def parseArgs(remaining: List[String], current: CliArgs = CliArgs()): CliArgs =
-  remaining match
-    case Nil =>
-      current.configPath match
-        case Some(_) => current
-        case None    => printUsageAndExit(1)
-    case "--help" :: _ =>
-      printUsageAndExit()
-    case "--monospace-font" :: fontPath :: tail =>
-      parseArgs(tail, current.copy(monospaceFontPath = Some(fontPath)))
-    case "--monospace-font" :: Nil =>
-      fail("missing value for --monospace-font")
-    case "--experimental" :: rest =>
-      parseArgs(rest, current.copy(experimental = true))
-    case "--literal-maps" :: rest =>
-      if (!current.experimental) fail("literal-maps requires --experimental")
-      parseArgs(rest, current.copy(literalMaps = true))
-    case "--output" :: output :: tail =>
-      parseArgs(tail, current.copy(outputPath = output))
-    case "--output" :: Nil =>
-      fail("missing value for --output")
-    case flag :: _ if flag.startsWith("--") =>
-      fail(s"unknown option: ${flag}")
-    case configPath :: tail =>
-      current.configPath match
-        case None =>
-          parseArgs(tail, current.copy(configPath = Some(configPath)))
-        case Some(existing) =>
-          fail(
-            s"received more than one config file: ${existing}, ${configPath}"
-          )
+  Logger.info(s"Begin - config file: ${configPath0.toString}")
+  Logger.info(s"Output file: ${outputPath.toString}")
+  monospaceFontPath.foreach(fontPath => Logger.info(s"Monospace font file: ${fontPath.toString}"))
+  val conf = configs.readConfig(configPath0, experimental, literalMaps)
+  Logger.info("parsed config")
 
-class InvoiceMarkup(conf: InvoiceSchema, issueDate: LocalDate):
+  val validConf = validateConfig(conf)
+
+  val invoiceDocument = InvoiceMarkup(conf, validConf.issueDate).build
+  Logger.info("Built markup.")
+
+  PdfRenderer.render(outputPath, monospaceFontPath, invoiceDocument)
+
+  Logger.info("Invoice created successfully.")
+}
+
+@main def main(args: String*): Unit = Flagged.parseOrExit[this.type](args)
+
+class InvoiceMarkup(conf: InvoiceSchema, issueDate: LocalDate) {
   import FontFamily.*
   import FontStyle.*
   import FontWeight.*
@@ -268,35 +270,34 @@ class InvoiceMarkup(conf: InvoiceSchema, issueDate: LocalDate):
         )
       )
 
-  def build: DocumentSpec =
-    val firstPage =
-      page()(
-        p(titleStyle.copy(marginBottom = 1.lh))("INVOICE"),
-        businessSection,
-        dateSection,
-        purchaseSummary,
-        clientSummary,
-        paymentDetails,
-        appendixSummaryBlock
+  def build: DocumentSpec = {
+    val firstPage = page()(
+      p(titleStyle.copy(marginBottom = 1.lh))("INVOICE"),
+      businessSection,
+      dateSection,
+      purchaseSummary,
+      clientSummary,
+      paymentDetails,
+      appendixSummaryBlock
+    )
+
+    def appendixPage(appendix: Appendix, appendixIdx: Int): PageSpec = {
+      def section(section: AppendixSection): Fragment = div(
+        p(headingStyle.copy(marginBottom = 1.lh))(section.title),
+        p(
+          italicStyle.copy(
+            width = Some(500.px),
+            whiteSpace = Wrap
+          )
+        )(
+          section.desc
+        ),
+        p(bodyStyle.copy(marginBottom = 1.lh))(section.itemsTitle),
+        ul(bodyStyle, style = Style(width = Some(450.px)))(
+          section.items.toList.map({ (id, desc) => li(s"$id: $desc") })*
+        )
       )
 
-    def appendixPage(appendix: Appendix, appendixIdx: Int): PageSpec =
-      def section(section: AppendixSection): Fragment =
-        div(
-          p(headingStyle.copy(marginBottom = 1.lh))(section.title),
-          p(
-            italicStyle.copy(
-              width = Some(500.px),
-              whiteSpace = Wrap
-            )
-          )(
-            section.desc
-          ),
-          p(bodyStyle.copy(marginBottom = 1.lh))(section.itemsTitle),
-          ul(bodyStyle, style = Style(width = Some(450.px)))(
-            section.items.toList.map({ (id, desc) => li(s"$id: $desc") })*
-          )
-        )
       page()(
         p(titleStyle.copy(marginBottom = 1.lh))(
           appendixTitles(appendixIdx)
@@ -308,42 +309,12 @@ class InvoiceMarkup(conf: InvoiceSchema, issueDate: LocalDate):
           appendix.sections.map(section)*
         )
       )
+    }
 
     document(
       (Vector(firstPage) ++ conf.appendices.zipWithIndex
         .map(appendixPage)
         .toVector)*
     )
-
-@main def invoicer(args: String*): Unit =
-  val cliArgs = parseArgs(args.toList)
-  val monospaceFontPath = cliArgs.monospaceFontPath.map(parsePath(_, "monospace font"))
-  val configPath = parsePath(cliArgs.configPath.get, "config")
-  val outputPath = parsePath(cliArgs.outputPath, "output")
-
-  requireValid(os.isFile(configPath), s"config file not found: ${configPath.toString}")
-  requireValid(
-    !os.isDir(outputPath),
-    s"output path points to a directory: ${outputPath.toString}"
-  )
-  monospaceFontPath.foreach { fontPath =>
-    requireValid(
-      os.isFile(fontPath),
-      s"monospace font file not found: ${fontPath.toString}"
-    )
   }
-
-  Logger.info(s"Begin - config file: ${configPath.toString}")
-  Logger.info(s"Output file: ${outputPath.toString}")
-  monospaceFontPath.foreach(fontPath => Logger.info(s"Monospace font file: ${fontPath.toString}"))
-  val conf = configs.readConfig(configPath, cliArgs.experimental, cliArgs.literalMaps)
-  Logger.info("parsed config")
-
-  val validConf = validateConfig(conf)
-
-  val invoiceDocument = InvoiceMarkup(conf, validConf.issueDate).build
-  Logger.info("Built markup.")
-
-  PdfRenderer.render(outputPath, monospaceFontPath, invoiceDocument)
-
-  Logger.info("Invoice created successfully.")
+}

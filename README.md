@@ -20,7 +20,7 @@ The `invoicer.sc` script validates the config file, calculates the full total an
 > ```
 > **Try out collection literal syntax:**
 > ```bash
-> ./invoicer.sh --experimental --literal-maps resources/sample-config-literals.son
+> ./invoicer.sh --experimental --literal-maps resources/sample-config-literals.scon
 > ```
 
 - either put config `*.sc` files in resources (with `conf_` prefix to be ignored by git),

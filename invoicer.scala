@@ -9,16 +9,16 @@ import java.time.format.DateTimeFormatter
 import flagged.*
 
 @run
-@version("1.0.0")
+@version("1.0.1")
 @name("./invoicer.sh")
 @help("generate an invoice from a config file")
 def invoicer(
     @help("Use a custom monospace font file for bank details fields")
-    monospaceFont: Option[String] = None,
+    monospaceFont: Option[os.Path] = None,
     @help("Write the PDF to a custom path")
-    output: String = "Invoice.pdf",
+    output: os.Path = os.pwd / "Invoice.pdf",
     @help("the config file to read from") @positional
-    configPath: String,
+    configPath: os.Path,
     @help("Use the experimental config reader")
     experimental: Boolean = false,
     @help("Use literal maps for config parsing")
@@ -28,26 +28,22 @@ def invoicer(
     Logger.error("--literal-maps are not supported without --experimental")
     return
   }
-  val monospaceFontPath = monospaceFont.map(parsePath(_, "monospace font"))
-  val configPath0 = parsePath(configPath, "config")
-  val outputPath = parsePath(output, "output")
-
-  requireValid(os.isFile(configPath0), s"config file not found: ${configPath0.toString}")
+  requireValid(os.isFile(configPath), s"config file not found: ${configPath.toString}")
   requireValid(
-    !os.isDir(outputPath),
-    s"output path points to a directory: ${outputPath.toString}"
+    !os.isDir(output),
+    s"output path points to a directory: ${output.toString}"
   )
-  monospaceFontPath.foreach { fontPath =>
+  monospaceFont.foreach { fontPath =>
     requireValid(
       os.isFile(fontPath),
       s"monospace font file not found: ${fontPath.toString}"
     )
   }
 
-  Logger.info(s"Begin - config file: ${configPath0.toString}")
-  Logger.info(s"Output file: ${outputPath.toString}")
-  monospaceFontPath.foreach(fontPath => Logger.info(s"Monospace font file: ${fontPath.toString}"))
-  val conf = configs.readConfig(configPath0, experimental, literalMaps)
+  Logger.info(s"Begin - config file: ${configPath.toString}")
+  Logger.info(s"Output file: ${output.toString}")
+  monospaceFont.foreach(fontPath => Logger.info(s"Monospace font file: ${fontPath.toString}"))
+  val conf = configs.readConfig(configPath, experimental, literalMaps)
   Logger.info("parsed config")
 
   val validConf = validateConfig(conf)
@@ -55,7 +51,7 @@ def invoicer(
   val invoiceDocument = InvoiceMarkup(conf, validConf.issueDate).build
   Logger.info("Built markup.")
 
-  PdfRenderer.render(outputPath, monospaceFontPath, invoiceDocument)
+  PdfRenderer.render(output, monospaceFont, invoiceDocument)
 
   Logger.info("Invoice created successfully.")
 }

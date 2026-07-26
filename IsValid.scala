@@ -1,6 +1,9 @@
 import java.time.LocalDate
 import java.time.format.DateTimeParseException
 import java.time.format.DateTimeFormatter
+import java.nio.file.Path as NioPath
+import steps.result.Result
+import flagged.Parser
 
 def fail(msg: String): Nothing =
   Logger.error(msg)
@@ -9,11 +12,12 @@ def fail(msg: String): Nothing =
 def requireValid(condition: Boolean, message: => String): Unit =
   if !condition then fail(message)
 
-def parsePath(rawPath: String, label: String): os.Path =
-  try os.Path(rawPath, os.pwd)
+given Parser.Value[os.Path] = summon[Parser.Value[NioPath]].emap { rawPath =>
+  try Result.Ok(os.Path(rawPath, os.pwd))
   catch
     case _: IllegalArgumentException =>
-      fail(s"invalid ${label} path: ${rawPath}")
+      Result.Err(s"invalid path: ${rawPath.toString}")
+}
 
 def parseInvoiceDate(dateText: String): LocalDate =
   try LocalDate.parse(dateText, DateTimeFormatter.ofPattern("yyyy/M/d"))

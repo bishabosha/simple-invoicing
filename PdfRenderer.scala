@@ -3,6 +3,7 @@ import org.apache.pdfbox.pdmodel.font.{PDType1Font, PDFont, Standard14Fonts}
 import org.apache.pdfbox.pdmodel.font.PDType0Font
 import Standard14Fonts.FontName
 import org.apache.pdfbox.pdmodel.common.PDRectangle
+import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject
 import scala.collection.mutable
 
 enum Fonts(name: FontName) extends PDType1Font(name):
@@ -11,29 +12,35 @@ enum Fonts(name: FontName) extends PDType1Font(name):
   case HelveticaOblique extends Fonts(FontName.HELVETICA_OBLIQUE)
   case Courier extends Fonts(FontName.COURIER)
   case TimesRoman extends Fonts(FontName.TIMES_ROMAN)
+  case TimesBold extends Fonts(FontName.TIMES_BOLD)
+  case TimesItalic extends Fonts(FontName.TIMES_ITALIC)
 
 object PdfRenderer:
   private final class PdfFontCatalog(
       document: PDDocument,
-      monospaceFontPath: Option[os.Path]
+      fontFiles: Map[FontRef, os.Path]
   ) extends FontMetrics:
     private val MaxCachedTextLength = 64
     private val MaxWidthCacheEntries = 4096
     private val widthCache = mutable.HashMap.empty[(FontRef, Int, String), Float]
+    private val customFonts = mutable.HashMap.empty[FontRef, PDFont]
 
-    private lazy val monospaceFont =
-      monospaceFontPath
-        .map(path => PDType0Font.load(document, path.toIO))
-        .getOrElse(Fonts.Courier)
-
-    def pdfFont(font: FontRef): PDFont =
+    private def standardFont(font: FontRef): PDFont =
       font match
         case FontRef.Helvetica        => Fonts.Helvetica
         case FontRef.HelveticaBold    => Fonts.HelveticaBold
         case FontRef.HelveticaOblique => Fonts.HelveticaOblique
         case FontRef.Courier          => Fonts.Courier
         case FontRef.TimesRoman       => Fonts.TimesRoman
-        case FontRef.Monospace        => monospaceFont
+        case FontRef.TimesBold        => Fonts.TimesBold
+        case FontRef.TimesItalic      => Fonts.TimesItalic
+        case FontRef.Monospace        => Fonts.Courier
+
+    def pdfFont(font: FontRef): PDFont =
+      fontFiles.get(font) match
+        case Some(path) =>
+          customFonts.getOrElseUpdate(font, PDType0Font.load(document, path.toIO))
+        case None => standardFont(font)
 
     private def measuredWidth(font: FontRef, text: String, fontSize: Int): Float =
       pdfFont(font).getStringWidth(text) / 1000 * fontSize
@@ -47,6 +54,12 @@ object PdfRenderer:
           measuredWidth(font, text, fontSize)
         )
 
+  private final class PdfImageCatalog(document: PDDocument):
+    private val cache = mutable.HashMap.empty[String, PDImageXObject]
+
+    def image(src: String): PDImageXObject =
+      cache.getOrElseUpdate(src, PDImageXObject.createFromFile(src, document))
+
   private def rectangle(pageSize: PageSize): PDRectangle =
     pageSize match
       case PageSize.A4 => PDRectangle.A4
@@ -54,16 +67,21 @@ object PdfRenderer:
   private def renderPage(
       document: PDDocument,
       pageLayout: LayoutPage,
-      fonts: PdfFontCatalog
+      fonts: PdfFontCatalog,
+      images: PdfImageCatalog
   ): Unit =
     val page = new PDPage(rectangle(pageLayout.size))
     document.addPage(page)
+
+    def setFillColor(contentStream: PDPageContentStream, color: Rgb): Unit =
+      contentStream.setNonStrokingColor(color.r / 255f, color.g / 255f, color.b / 255f)
 
     val contentStream = new PDPageContentStream(document, page)
     try
       for element <- pageLayout.elements do
         element match
-          case PageElement.Text(font, fontSize, x, y, steps) =>
+          case PageElement.Text(font, fontSize, color, x, y, steps) =>
+            setFillColor(contentStream, color)
             contentStream.beginText()
             contentStream.setFont(fonts.pdfFont(font), fontSize)
             contentStream.newLineAtOffset(x, y)
@@ -77,6 +95,12 @@ object PdfRenderer:
             contentStream.moveTo(startX, startY)
             contentStream.lineTo(endX, endY)
             contentStream.stroke()
+          case PageElement.Rect(x, y, width, height, color) =>
+            setFillColor(contentStream, color)
+            contentStream.addRect(x, y, width, height)
+            contentStream.fill()
+          case PageElement.Image(src, x, y, width, height) =>
+            contentStream.drawImage(images.image(src), x, y, width, height)
     finally contentStream.close()
 
   def tempFileOp(dest: os.Path)(f: os.Path => Unit): Unit =
@@ -97,17 +121,18 @@ object PdfRenderer:
 
   def render(
       outputPath: os.Path,
-      monospaceFontPath: Option[os.Path],
+      fontFiles: Map[FontRef, os.Path],
       documentSpec: DocumentSpec
   ): Unit =
     val document = new PDDocument()
     try
-      val fonts = new PdfFontCatalog(document, monospaceFontPath)
+      val fonts = new PdfFontCatalog(document, fontFiles)
       Logger.info("Built font catalog.")
+      val images = new PdfImageCatalog(document)
       val layout = LayoutCompiler.compile(documentSpec, fonts)
       Logger.info("Compiled layout.")
       for (pageLayout, idx) <- layout.pages.zipWithIndex do
-        renderPage(document, pageLayout, fonts)
+        renderPage(document, pageLayout, fonts, images)
         Logger.info(s"Rendered page ${idx + 1} of ${layout.pages.size}")
       end for
       tempFileOp(outputPath)(tempOutputPath => document.save(tempOutputPath.toIO))

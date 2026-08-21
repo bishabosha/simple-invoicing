@@ -61,6 +61,7 @@ class InvoiceMarkup(conf: InvoiceSchema, issueDate: LocalDate) {
 
   case class InvoiceItem(
       description: String,
+      body: Option[String],
       quantity: BigDecimal,
       unitPrice: BigDecimal,
       total: BigDecimal
@@ -70,7 +71,7 @@ class InvoiceMarkup(conf: InvoiceSchema, issueDate: LocalDate) {
     val qtyDec = BigDecimal.decimal(item.qty)
     val unitPrice = BigDecimal(item.price) / 100
     val lineTotal = roundMoney(qtyDec * unitPrice)
-    InvoiceItem(item.desc, qtyDec, unitPrice, lineTotal)
+    InvoiceItem(item.desc, item.body, qtyDec, unitPrice, lineTotal)
   }
 
   val itemsSubtotal =
@@ -132,7 +133,7 @@ class InvoiceMarkup(conf: InvoiceSchema, issueDate: LocalDate) {
         th("Unit Price", Style(width = Some(60.px))),
         th("Total", Style(width = Some(75.px)))
       )(
-        items.map { case InvoiceItem(description, quantity, unitPrice, total) =>
+        items.map { case InvoiceItem(description, _, quantity, unitPrice, total) =>
           val qtyFormat = quantityFormatter(quantity)
           val qty =
             if conf.listings.useHours then s"$qtyFormat hrs"
@@ -213,6 +214,36 @@ class InvoiceMarkup(conf: InvoiceSchema, issueDate: LocalDate) {
         )
       )
 
+  def appendixPage(appendix: Appendix, appendixIdx: Int): PageSpec = {
+    def section(section: AppendixSection): Fragment = div(
+      p(headingStyle.copy(marginBottom = 1.lh))(section.title),
+      p(
+        italicStyle.copy(
+          width = Some(500.px),
+          whiteSpace = Wrap
+        )
+      )(
+        section.desc
+      ),
+      p(bodyStyle.copy(marginBottom = 1.lh))(section.itemsTitle),
+      ul(bodyStyle, style = Style(width = Some(450.px)))(
+        section.items.toList.map({ (id, desc) => li(s"$id: $desc") })*
+      )
+    )
+
+    page()(
+      p(titleStyle.copy(marginBottom = 1.lh))(
+        appendixTitles(appendixIdx)
+      ),
+      p(italicStyle.copy(marginBottom = 2.lh))(
+        appendix.description
+      ),
+      div(
+        appendix.sections.map(section)*
+      )
+    )
+  }
+
   def build: DocumentSpec = {
     val firstPage = page()(
       p(titleStyle.copy(marginBottom = 1.lh))("INVOICE"),
@@ -223,36 +254,6 @@ class InvoiceMarkup(conf: InvoiceSchema, issueDate: LocalDate) {
       paymentDetails,
       appendixSummaryBlock
     )
-
-    def appendixPage(appendix: Appendix, appendixIdx: Int): PageSpec = {
-      def section(section: AppendixSection): Fragment = div(
-        p(headingStyle.copy(marginBottom = 1.lh))(section.title),
-        p(
-          italicStyle.copy(
-            width = Some(500.px),
-            whiteSpace = Wrap
-          )
-        )(
-          section.desc
-        ),
-        p(bodyStyle.copy(marginBottom = 1.lh))(section.itemsTitle),
-        ul(bodyStyle, style = Style(width = Some(450.px)))(
-          section.items.toList.map({ (id, desc) => li(s"$id: $desc") })*
-        )
-      )
-
-      page()(
-        p(titleStyle.copy(marginBottom = 1.lh))(
-          appendixTitles(appendixIdx)
-        ),
-        p(italicStyle.copy(marginBottom = 2.lh))(
-          appendix.description
-        ),
-        div(
-          appendix.sections.map(section)*
-        )
-      )
-    }
 
     document(
       (Vector(firstPage) ++ conf.appendices.zipWithIndex

@@ -1,23 +1,10 @@
 package configs
 
 import scala.NamedTuple.AnyNamedTuple
-import steps.result.Result
 import scala.collection.immutable.SeqMap
-
-type ItemSchema = (desc: String, body: Option[String], qty: Double, price: Int)
-
-type SectionSchema = (
-    title: String,
-    desc: String,
-    itemsTitle: String,
-    items: SeqMap[String, String]
-)
-
-type AppendixSchema = (
-    title: String,
-    description: String,
-    sections: Vector[SectionSchema]
-)
+import scalanotation.{Configured, DefaultValues, Reader, Readers}
+import steps.result.Result
+import scalanotation.schema.RawSchema
 
 type InvoiceSchema = (
     invoice: (
@@ -31,7 +18,7 @@ type InvoiceSchema = (
         contactPerson: Option[String]
     ),
     listings: (
-        items: Vector[ItemSchema],
+        items: Vector[(desc: String, body: Option[String], qty: Double, price: Int)],
         taxRate: Int,
         useHours: Boolean
     ),
@@ -39,7 +26,20 @@ type InvoiceSchema = (
     copyright: Option[String],
     currency: (code: String, symbol: String, left: Boolean),
     bank: SeqMap[String, String],
-    appendices: Vector[AppendixSchema]
+    appendices: Vector[
+      (
+          title: String,
+          description: String,
+          sections: Vector[
+            (
+                title: String,
+                desc: String,
+                itemsTitle: String,
+                items: SeqMap[String, String]
+            )
+          ]
+      )
+    ]
 )
 
 type Search[Key <: String, Keys <: Tuple, Values <: Tuple] =
@@ -54,55 +54,61 @@ type SelectField[NT <: AnyNamedTuple, F <: String] = NT match
 type SelectElem[F <: scala.collection.Seq[?]] = F match
   case scala.collection.Seq[e] => e
 
-def defaultReader[V: scalanotation.Reader]: scalanotation.Reader[SeqMap[String, V]] =
-  summon[scalanotation.Reader[SeqMap[String, V]]]
+def defaultReader[V: Reader]: Reader[SeqMap[String, V]] =
+  summon[Reader[SeqMap[String, V]]]
 
 def readConfig(
     path: os.Path,
     experimental: Boolean = false,
     literalMaps: Boolean = false
 ): InvoiceSchema =
-  given [V: scalanotation.Reader] => scalanotation.Reader[SeqMap[String, V]] =
-    if literalMaps then scalanotation.Reader.pairSeqAsDict
+  given [V: Reader] => Reader[SeqMap[String, V]] =
+    if literalMaps then Reader.pairSeqAsDict
     else defaultReader
 
-  // the unused-lint cannot see uses from inside the inline derivation below
-  import scala.annotation.nowarn
-  given optStringReader: scalanotation.Reader[Option[String]] =
-    scalanotation.Reader.OptionSchema[String]
-  @nowarn("msg=unused local definition")
-  given itemReader: scalanotation.Reader[ItemSchema] = scalanotation.Reader.derived
-  @nowarn("msg=unused local definition")
-  given itemsReader: scalanotation.Reader[Vector[ItemSchema]] =
-    scalanotation.Reader.VectorSchema[ItemSchema]
-  @nowarn("msg=unused local definition")
-  given sectionReader: scalanotation.Reader[SectionSchema] = scalanotation.Reader.derived
-  @nowarn("msg=unused local definition")
-  given sectionsReader: scalanotation.Reader[Vector[SectionSchema]] =
-    scalanotation.Reader.VectorSchema[SectionSchema]
-  @nowarn("msg=unused local definition")
-  given appendixReader: scalanotation.Reader[AppendixSchema] = scalanotation.Reader.derived
-  @nowarn("msg=unused local definition")
-  given appendicesReader: scalanotation.Reader[Vector[AppendixSchema]] =
-    scalanotation.Reader.VectorSchema[AppendixSchema]
+  given Reader[InvoiceSchema] = invoiceReader
 
-  // fields introduced after the original schema default to None when omitted,
-  // so older config files keep parsing
-  given scalanotation.DefaultValues[InvoiceSchema] = scalanotation.DefaultValues.of { c =>
+  readConfigVia(path)(str =>
+    if experimental then
+      Readers.experimental.readDeclAs[InvoiceSchema](str, rootName = "Invoice")
+    else Readers.readDeclAs[InvoiceSchema](str, rootName = "Invoice")
+  )
+
+/** The standard implicit reader, with decode-time defaults installed so that
+  * config files predating a field keep parsing.
+  *
+  * `Reader.configured.derived` would re-derive the schema through `Mirror.Of`,
+  * which cannot resolve this schema's container fields without a pile of
+  * hand-written component instances. The defaults transform itself is
+  * schema-agnostic, so instead apply it to the schema of the implicit reader —
+  * reflectively, until the library grows a public `withConfig`
+  * (`Configured.applyToSchema` is `private[scalanotation]`, which is public in
+  * bytecode).
+  */
+private def invoiceReader(using Reader[SeqMap[String, String]]): Reader[InvoiceSchema] =
+  val defaults = DefaultValues.of[InvoiceSchema] { c =>
     Seq(
       c.copyright := None,
       c.listings.items.each.body := None
     )
   }
-  given scalanotation.Configured[InvoiceSchema] =
-    scalanotation.Configured.default.withDefaultValues
-  given scalanotation.Reader[InvoiceSchema] = scalanotation.Reader.configured.derived
+  val config = Configured.default[InvoiceSchema].withDefaultValues(using defaults)
+  val plain = summon[Reader[InvoiceSchema]]
+  applyConfiguredToSchema(plain, config)
 
-  readConfigVia(path)(str =>
-    if experimental then
-      scalanotation.Readers.experimental.readDeclAs[InvoiceSchema](str, rootName = "Invoice")
-    else scalanotation.Readers.readDeclAs[InvoiceSchema](str, rootName = "Invoice")
-  )
+/** ugly hack to reflectively run Configured.applyToSchema - it should be exposed publicly */
+private def applyConfiguredToSchema[T](plain: Reader[T], config: Configured[T]): Reader[T] = {
+  import scala.reflect.Selectable.reflectiveSelectable
+  val ConfiguredRefl = Configured.asInstanceOf[{
+    def applyToSchema(schema: RawSchema[?], config: Configured[?]): RawSchema[?]
+  }]
+  val ReaderRefl = Reader.asInstanceOf[{
+    def fromSchema(schema: RawSchema[?]): Reader[?]
+  }]
+  val patched = ConfiguredRefl.applyToSchema(plain.schema, config)
+  val reader = ReaderRefl.fromSchema(patched)
+  reader.asInstanceOf[Reader[T]]
+}
 
 private def readConfigVia(path: os.Path)(
     read: String => Result[InvoiceSchema, scalanotation.DecodeError]

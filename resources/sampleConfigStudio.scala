@@ -5,7 +5,7 @@
 //     --logo resources/images/logo.png \
 //     --paper-texture resources/images/paper-page.png \
 //     --accent-texture resources/images/paper-accent.png \
-//     resources/sampleConfigFacture.scala
+//     resources/sampleConfigStudio.scala
 val Invoice = (
   invoice = (
     id = 35,

@@ -1,7 +1,7 @@
 import flagged.*
 
 @run
-@version("1.0.1")
+@version("1.1.0")
 @name("./invoicer.sh")
 @help("generate an invoice from a config file")
 def invoicer(

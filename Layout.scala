@@ -4,10 +4,23 @@ enum FontRef:
   case HelveticaOblique
   case Courier
   case TimesRoman
+  case TimesBold
+  case TimesItalic
   case Monospace
 
 enum PageSize:
   case A4
+
+  def width: Float = this match
+    case A4 => 595.2756f
+
+  def height: Float = this match
+    case A4 => 841.8898f
+
+case class Rgb(r: Int, g: Int, b: Int)
+
+object Rgb:
+  val Black: Rgb = Rgb(0, 0, 0)
 
 case class TextStep(dx: Float = 0, dy: Float = 0, text: String)
 
@@ -15,6 +28,7 @@ enum PageElement:
   case Text(
       font: FontRef,
       size: Int,
+      color: Rgb,
       x: Float,
       y: Float,
       steps: Vector[TextStep]
@@ -25,6 +39,20 @@ enum PageElement:
       startY: Float,
       endX: Float,
       endY: Float
+  )
+  case Rect(
+      x: Float,
+      y: Float,
+      width: Float,
+      height: Float,
+      color: Rgb
+  )
+  case Image(
+      src: String,
+      x: Float,
+      y: Float,
+      width: Float,
+      height: Float
   )
 
 case class LayoutPage(size: PageSize = PageSize.A4, elements: Vector[PageElement])
@@ -39,8 +67,8 @@ trait FontMetrics:
 final class PageBuilder(val size: PageSize = PageSize.A4):
   private val elementsB = Vector.newBuilder[PageElement]
 
-  def text(font: FontRef, fontSize: Int, x: Float, y: Float)(steps: TextStep*): Unit =
-    elementsB += PageElement.Text(font, fontSize, x, y, steps.toVector)
+  def text(font: FontRef, fontSize: Int, color: Rgb, x: Float, y: Float)(steps: TextStep*): Unit =
+    elementsB += PageElement.Text(font, fontSize, color, x, y, steps.toVector)
 
   def line(
       width: Float,
@@ -50,6 +78,15 @@ final class PageBuilder(val size: PageSize = PageSize.A4):
       endY: Float
   ): Unit =
     elementsB += PageElement.Line(width, startX, startY, endX, endY)
+
+  def rect(x: Float, y: Float, width: Float, height: Float, color: Rgb): Unit =
+    elementsB += PageElement.Rect(x, y, width, height, color)
+
+  def image(src: String, x: Float, y: Float, width: Float, height: Float): Unit =
+    elementsB += PageElement.Image(src, x, y, width, height)
+
+  def addAll(elements: Vector[PageElement]): Unit =
+    elementsB ++= elements
 
   def result(): LayoutPage =
     LayoutPage(size, elementsB.result())
@@ -143,6 +180,7 @@ object CssLength:
 enum TextAlign:
   case Left
   case Right
+  case Center
 
 enum WhiteSpace:
   case NoWrap
@@ -177,7 +215,14 @@ case class Style(
     fontStyle: FontStyle = FontStyle.Normal,
     lineHeight: Float = 15,
     borderWidth: Float = 0.5f,
-    marker: String = "-"
+    marker: String = "-",
+    color: Rgb = Rgb.Black,
+    backgroundColor: Option[Rgb] = None,
+    backgroundImage: Option[String] = None,
+    backgroundBleed: Boolean = false,
+    /* absolute page-Y cap for a Stack's top edge: the block starts at the
+     * lower of its flow position and this, e.g. to anchor a footer band */
+    maxTop: Option[Float] = None
 ):
   def resolveMarginTop(): Float =
     marginTop.resolve(lineHeight)
@@ -207,7 +252,10 @@ case class Style(
       case FontFamily.Courier =>
         FontRef.Courier
       case FontFamily.Times =>
-        FontRef.TimesRoman
+        (fontWeight, fontStyle) match
+          case (FontWeight.Bold, _)  => FontRef.TimesBold
+          case (_, FontStyle.Italic) => FontRef.TimesItalic
+          case _                     => FontRef.TimesRoman
       case FontFamily.Monospace =>
         FontRef.Monospace
 
@@ -222,7 +270,11 @@ case class Style(
       textAlign = TextAlign.Left,
       whiteSpace = WhiteSpace.NoWrap,
       borderWidth = 0.5f,
-      marker = "-"
+      marker = "-",
+      backgroundColor = None,
+      backgroundImage = None,
+      backgroundBleed = false,
+      maxTop = None
     )
 
 object Style:
@@ -256,8 +308,19 @@ enum FlowBlock:
   case Rule(style: Style)
   case Table(style: Style, spec: TableSpec)
   case BulletList(style: Style, spec: BulletListSpec)
+  case Image(style: Style, src: String, width: Float, height: Float)
+  /** Drawn at fixed page coordinates; does not take part in the flow. */
+  case AbsoluteImage(src: String, x: Float, y: Float, width: Float, height: Float)
 
-case class PageSpec(size: PageSize = PageSize.A4, blocks: Vector[FlowBlock])
+enum PageBackground:
+  case Fill(color: Rgb)
+  case Texture(src: String)
+
+case class PageSpec(
+    size: PageSize = PageSize.A4,
+    background: Option[PageBackground] = None,
+    blocks: Vector[FlowBlock]
+)
 case class DocumentSpec(pages: Vector[PageSpec])
 
 object Html:
@@ -318,6 +381,12 @@ object Html:
       )
     )
 
+  def img(src: String, width: Float, height: Float, style: Style = Style()): Fragment =
+    Vector(FlowBlock.Image(style, src, width, height))
+
+  def absoluteImg(src: String, x: Float, y: Float, width: Float, height: Float): Fragment =
+    Vector(FlowBlock.AbsoluteImage(src, x, y, width, height))
+
   def li(text: String): String =
     text
 
@@ -335,8 +404,11 @@ object Html:
       )
     )
 
-  def page(size: PageSize = PageSize.A4)(blocks: Fragment*): PageSpec =
-    PageSpec(size, blocks.iterator.flatMap(_.iterator).toVector)
+  def page(
+      size: PageSize = PageSize.A4,
+      background: Option[PageBackground] = None
+  )(blocks: Fragment*): PageSpec =
+    PageSpec(size, background, blocks.iterator.flatMap(_.iterator).toVector)
 
   def document(pages: PageSpec*): DocumentSpec =
     DocumentSpec(pages.toVector)
@@ -368,7 +440,7 @@ object LayoutCompiler:
       style: Style,
       steps: Vector[TextStep]
   ): Unit =
-    if steps.nonEmpty then page.text(style.fontRef, style.fontSize, x, y)(steps*)
+    if steps.nonEmpty then page.text(style.fontRef, style.fontSize, style.color, x, y)(steps*)
 
   private def requireWidth(style: Style, owner: String): Int =
     style.resolveWidth().map(_.toInt).getOrElse(sys.error(s"$owner requires Style.width"))
@@ -384,25 +456,38 @@ object LayoutCompiler:
   private def lineWidth(style: Style, line: String, fontMetrics: FontMetrics): Float =
     fontMetrics.stringWidth(style.fontRef, line, style.fontSize)
 
-  private def rightAlignedText(
+  /** Positions each line at `baseX + (width - lineWidth) * factor`:
+    * factor 1 is right-aligned, 0.5 is centered.
+    */
+  private def alignedText(
       style: Style,
       lines: Vector[String],
-      rightEdge: Float,
+      baseX: Float,
+      width: Float,
+      factor: Float,
       fontMetrics: FontMetrics
   ): (Float, Vector[TextStep]) =
+    def lineX(line: String): Float =
+      baseX + (width - lineWidth(style, line, fontMetrics)) * factor
     val head = lines.head
-    val firstX = rightEdge - lineWidth(style, head, fontMetrics)
+    val firstX = lineX(head)
     val stepsB = Vector.newBuilder[TextStep]
     stepsB += textStep(head)
 
     var previousX = firstX
     for line <- lines.tail do
-      val x = rightEdge - lineWidth(style, line, fontMetrics)
+      val x = lineX(line)
       stepsB += textStep(line, dx = x - previousX, dy = -style.lineHeight)
       previousX = x
     end for
 
     (firstX, stepsB.result())
+
+  private def alignFactor(textAlign: TextAlign): Float =
+    textAlign match
+      case TextAlign.Left   => 0f
+      case TextAlign.Center => 0.5f
+      case TextAlign.Right  => 1f
 
   private def rowFirstLineWidth(
       texts: Vector[PreparedText]
@@ -516,22 +601,24 @@ object LayoutCompiler:
     val rowHeights = rowLines.map(_.map(_.size).maxOption.getOrElse(1))
     val tableBottomY = topY - (rowHeights.sum + 1) * rowHeight
 
-    locally:
-      var i = 0
-      for bucketSize <- 1 +: rowHeights ++: Seq(1) do
-        val y = topY - DefaultTableGridOffsetY - i * rowHeight
-        page.line(lineWidth, baseX, y, baseX + totalWidth, y)
-        i += bucketSize
-      end for
+    if lineWidth > 0 then
+      locally:
+        var i = 0
+        for bucketSize <- 1 +: rowHeights ++: Seq(1) do
+          val y = topY - DefaultTableGridOffsetY - i * rowHeight
+          page.line(lineWidth, baseX, y, baseX + totalWidth, y)
+          i += bucketSize
+        end for
 
-    for x <- colBoundaries do
-      page.line(
-        lineWidth,
-        baseX + x,
-        topY - DefaultTableGridOffsetY,
-        baseX + x,
-        tableBottomY - DefaultTableGridOffsetY
-      )
+      for x <- colBoundaries do
+        page.line(
+          lineWidth,
+          baseX + x,
+          topY - DefaultTableGridOffsetY,
+          baseX + x,
+          tableBottomY - DefaultTableGridOffsetY
+        )
+    end if
 
     var rowY = topY - (rowHeight * 2)
     for (cells, rowHeightUnits) <- rowLines.zip(rowHeights) do
@@ -597,11 +684,14 @@ object LayoutCompiler:
     block match
       case FlowBlock.Stack(style, children) =>
         val resolvedStyle = inheritedStyle.fold(style)(inheritStyle(style, _))
-        var nextY = resolvedStartY(resolvedStyle, currentY)
+        val flowStartY = resolvedStartY(resolvedStyle, currentY)
+        val startY = resolvedStyle.maxTop.fold(flowStartY)(flowStartY.min)
         val childBaseX = resolvedBaseX(resolvedStyle, baseX)
+        val content = new PageBuilder(page.size)
+        var nextY = startY
         for (child, idx) <- children.zipWithIndex do
           nextY = compileFlowBlock(
-            page,
+            content,
             childBaseX,
             nextY,
             child,
@@ -610,32 +700,45 @@ object LayoutCompiler:
           )
           if idx < children.size - 1 then nextY -= resolvedStyle.resolveGap()
         end for
+        if resolvedStyle.backgroundColor.isDefined || resolvedStyle.backgroundImage.isDefined
+        then
+          val (left, right, top, bottom) =
+            if resolvedStyle.backgroundBleed then (0f, page.size.width, startY, 0f)
+            else
+              val width =
+                resolvedStyle.resolveWidth().getOrElse(page.size.width - childBaseX)
+              (childBaseX, childBaseX + width, startY, nextY)
+          resolvedStyle.backgroundColor.foreach { color =>
+            page.rect(left, bottom, right - left, top - bottom, color)
+          }
+          resolvedStyle.backgroundImage.foreach { src =>
+            page.image(src, left, bottom, right - left, top - bottom)
+          }
+        end if
+        page.addAll(content.result().elements)
         nextY - resolvedStyle.resolveMarginBottom()
       case FlowBlock.Row(style, texts) =>
         val resolvedStyle = inheritedStyle.fold(style)(inheritStyle(style, _))
         val y = resolvedStartY(resolvedStyle, currentY)
         val rawBaseX = resolvedBaseX(resolvedStyle, baseX)
         val preparedTexts = texts.map(prepareText(resolvedStyle, _, fontMetrics))
-        val isRightAlignedParagraph =
-          resolvedStyle.textAlign == TextAlign.Right &&
+        val factor = alignFactor(resolvedStyle.textAlign)
+        val isAlignedParagraph =
+          factor > 0 &&
             preparedTexts.size == 1 &&
             preparedTexts.head.lines.size > 1
 
-        if isRightAlignedParagraph then
+        if isAlignedParagraph then
           val text = preparedTexts.head
-          val rightEdge = rawBaseX + resolvedStyle.resolveWidth().getOrElse(0f)
+          val width = resolvedStyle.resolveWidth().getOrElse(0f)
           val (x, steps) =
-            rightAlignedText(text.style, text.lines, rightEdge, fontMetrics)
+            alignedText(text.style, text.lines, rawBaseX, width, factor, fontMetrics)
           emitText(page, x, y, text.style, steps)
           y - text.depth - resolvedStyle.resolveMarginBottom()
         else
           val rowBaseX =
-            resolvedStyle.textAlign match
-              case TextAlign.Left =>
-                rawBaseX
-              case TextAlign.Right =>
-                val rightEdge = rawBaseX + resolvedStyle.resolveWidth().getOrElse(0f)
-                rightEdge - rowFirstLineWidth(preparedTexts)
+            rawBaseX +
+              (resolvedStyle.resolveWidth().getOrElse(0f) - rowFirstLineWidth(preparedTexts)) * factor
 
           var maxDepth = 0f
           locally:
@@ -697,12 +800,30 @@ object LayoutCompiler:
         val x = resolvedBaseX(style, baseX)
         val depth = compileBulletList(page, x, y, style, spec, fontMetrics)
         y - depth - style.resolveMarginBottom()
+      case FlowBlock.Image(style, src, width, height) =>
+        val resolvedStyle = inheritedStyle.fold(style)(inheritStyle(style, _))
+        val y = resolvedStartY(resolvedStyle, currentY)
+        val x0 = resolvedBaseX(resolvedStyle, baseX)
+        val x =
+          x0 + (resolvedStyle.resolveWidth().getOrElse(width) - width) *
+            alignFactor(resolvedStyle.textAlign)
+        page.image(src, x, y - height, width, height)
+        y - height - resolvedStyle.resolveMarginBottom()
+      case FlowBlock.AbsoluteImage(src, x, y, width, height) =>
+        page.image(src, x, y, width, height)
+        currentY
 
   private def compilePage(
       pageSpec: PageSpec,
       fontMetrics: FontMetrics
   ): LayoutPage =
     val page = new PageBuilder(pageSpec.size)
+    pageSpec.background.foreach {
+      case PageBackground.Fill(color) =>
+        page.rect(0, 0, pageSpec.size.width, pageSpec.size.height, color)
+      case PageBackground.Texture(src) =>
+        page.image(src, 0, 0, pageSpec.size.width, pageSpec.size.height)
+    }
     var nextY = DefaultPageOriginY
     for block <- pageSpec.blocks do
       val res = compileFlowBlock(

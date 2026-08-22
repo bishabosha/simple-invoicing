@@ -18,11 +18,14 @@ val Invoice = (
     items = Vector(
       (
         desc = "simplified description e.g. SKU, or reference to service in appendix",
+        body = "optional longer description, shown in grey italics under the item" +
+          " (studio layout only)", // or null
         qty = 15, // raw numbers of the 'desc'
         price = 75_00 // in the smallest denomination (only decimal currencies supported)
       ),
       (
         desc = "fractional orders are supported",
+        // `body` may simply be omitted
         qty = 7.5,
         price = 15
       )
@@ -35,6 +38,7 @@ val Invoice = (
     "London, SE1,\n" +
     "United Kingdom,\n" +
     "example@example.com",
+  copyright = "Content © Lisa Simpson", // shown by the studio layout, or null
   currency = (code = "EUR", symbol = "€", left = true),
   bank = (
     `Beneficiary` = "President Business",

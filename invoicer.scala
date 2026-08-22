@@ -1,29 +1,27 @@
 import flagged.*
 
-@run
-@version("1.1.0")
-@name("./invoicer.sh")
-@help("generate an invoice from a config file")
+@cmd(name = "./invoicer.sh", help = "generate an invoice from a config file")
+@version("1.1.1")
 def invoicer(
-    @help("Use a custom monospace font file for bank details fields")
+    @opt(help = "Use a custom monospace font file for bank details fields")
     monospaceFont: Option[os.Path] = None,
-    @help("Write the PDF to a custom path")
+    @opt(help = "Write the PDF to a custom path")
     output: os.Path = os.pwd / "Invoice.pdf",
-    @help("the config file to read from") @positional
+    @opt(help = "the config file to read from", positional = true)
     configPath: os.Path,
-    @help("Use the experimental config reader")
+    @opt(help = "Use the experimental config reader")
     experimental: Boolean = false,
-    @help("Use literal maps for config parsing")
+    @opt(help = "Use literal maps for config parsing")
     literalMaps: Boolean = false,
-    @help("Invoice layout: classic or studio")
+    @opt(help = "Invoice layout: classic or studio")
     layout: String = "classic",
-    @help("Logo image for the studio layout footer")
+    @opt(help = "Logo image for the studio layout footer")
     logo: Option[os.Path] = None,
-    @help("Paper texture image drawn behind studio layout pages")
+    @opt(help = "Paper texture image drawn behind studio layout pages")
     paperTexture: Option[os.Path] = None,
-    @help("Texture image for the studio layout footer band")
+    @opt(help = "Texture image for the studio layout footer band")
     accentTexture: Option[os.Path] = None,
-    @help(
+    @opt(help =
       "Directory of font files overriding the built-in fonts. Matched on the" +
         " file name suffix: sans, sans-bold, sans-italic, serif, serif-bold," +
         " serif-italic, monospace (.ttf or .otf), so the name can keep the" +

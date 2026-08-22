@@ -4,7 +4,7 @@ Simple Invoicing app interprets config files describing an invoice and produces 
 
 The config file lets you describe business details, as well as a list of itemized products and prices, and even appendices to describe further details.
 
-The `invoicer.sc` script validates the config file, calculates the full total and applies optional sales tax.
+The `invoicer.sh` script validates the config file, calculates the full total and applies optional sales tax.
 
 ## Usage
 

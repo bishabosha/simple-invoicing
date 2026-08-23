@@ -22,11 +22,7 @@ def invoicer(
     @opt(help = "Texture image for the studio layout footer band")
     accentTexture: Option[os.Path] = None,
     @opt(help =
-      "Directory of font files overriding the built-in fonts. Matched on the" +
-        " file name suffix: sans, sans-bold, sans-italic, serif, serif-bold," +
-        " serif-italic, monospace (.ttf or .otf), so the name can keep the" +
-        " font identity, e.g. Lato-Regular.sans.ttf or PTSerif-Bold.serif-bold.ttf"
-    )
+      "Directory of font files overriding the built-in fonts. Matched on the file name suffix: sans, sans-bold, sans-italic, serif, serif-bold, serif-italic, monospace (.ttf or .otf), so the name can keep the font identity, e.g. Lato-Regular.sans.ttf or PTSerif-Bold.serif-bold.ttf")
     fontDir: Option[os.Path] = None
 ): Unit = {
   if (literalMaps && !experimental) {
